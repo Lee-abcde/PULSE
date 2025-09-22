@@ -59,7 +59,7 @@ if __name__ == "__main__":
     length_acc = []
     for data_path in tqdm(all_pkls):
         bound = 0
-        splits = data_path.split("/")[7:]
+        splits = data_path.split("/")[1:]
         key_name_dump = "0-" + "_".join(splits).replace(".npz", "")
         
         if (not splits[0] in process_set):
