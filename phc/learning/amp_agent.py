@@ -832,10 +832,50 @@ class AMPAgent(common_agent.CommonAgent):
                         humanoid_env.kld_coefficient = (0.01 - min_val) * max((anneal_end_epoch -self.epoch_num) / (anneal_end_epoch - anneal_start_epoch), 0) + min_val
                     info_dict["kin_kld_w"] = humanoid_env.kld_coefficient
                 ######### KLD annealing #######
-                
-                
-                    
-                    
+            elif humanoid_env.z_type == "vq_vae":
+                pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
+
+                # 动作预测损失
+                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()  # RMSE
+
+                # 从 extra_dict 取 VQ 输出
+                z_b = extra_dict['z_before_quant']  # 编码器输出
+                z_q = extra_dict['quantized_z_out']  # 量化后的向量
+
+                # commitment loss + codebook loss
+                beta = 0.25
+                commitment_loss = torch.mean((z_b.detach() - z_q) ** 2)
+                codebook_loss = torch.mean((z_b - z_q.detach()) ** 2)
+                vq_loss = codebook_loss + beta * commitment_loss
+
+                # AR1 时间连续性损失（可选）
+                ar1_prior = 0
+                if humanoid_env.use_ar1_prior:
+                    time_zs = z_q.view(self.minibatch_size // self.horizon_length, self.horizon_length, -1)
+                    phi = 0.99
+                    error = time_zs[:, 1:] - time_zs[:, :-1] * phi
+                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                                                          self.horizon_length, -1)
+                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                    error = error.view(-1, error.shape[-1])
+                    error[not_consecs] = 0
+                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
+                    error[starteres] = 0
+                    ar1_prior = torch.norm(error, dim=-1).mean()
+                    info_dict["kin_ar1"] = ar1_prior
+
+                # 总损失
+                vq_coeff = getattr(humanoid_env, "vq_coeff", 1.0)
+                kin_loss = kin_action_loss + vq_loss * vq_coeff + ar1_prior * humanoid_env.ar1_coefficient
+
+                info_dict["kin_action_loss"] = kin_action_loss
+                info_dict["kin_vq_loss"] = vq_loss
+                info_dict["kin_loss"] = kin_loss
+
+
+
+
+
             else:
                 raise NotImplementedError()    
                 
