@@ -834,24 +834,19 @@ class AMPAgent(common_agent.CommonAgent):
                 ######### KLD annealing #######
             elif humanoid_env.z_type == "vq_vae":
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
+                # ----------- 动作重建损失 -----------
+                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()
 
-                # 动作预测损失
-                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()  # RMSE
+                # ----------- 从模型中直接拿 VQ 损失 -----------
+                vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
+                info_dict["kin_vq_loss"] = vq_loss
 
-                # 从 extra_dict 取 VQ 输出
-                z_b = extra_dict['z_before_quant']  # 编码器输出
-                z_q = extra_dict['quantized_z_out']  # 量化后的向量
-
-                # commitment loss + codebook loss
-                beta = 0.25
-                commitment_loss = torch.mean((z_b.detach() - z_q) ** 2)
-                codebook_loss = torch.mean((z_b - z_q.detach()) ** 2)
-                vq_loss = codebook_loss + beta * commitment_loss
-
-                # AR1 时间连续性损失（可选）
+                # ----------- AR1 连续性约束（可选）-----------
                 ar1_prior = 0
                 if humanoid_env.use_ar1_prior:
-                    time_zs = z_q.view(self.minibatch_size // self.horizon_length, self.horizon_length, -1)
+                    time_zs = extra_dict['quantized_z_out'].view(
+                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                    )
                     phi = 0.99
                     error = time_zs[:, 1:] - time_zs[:, :-1] * phi
                     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
@@ -864,13 +859,23 @@ class AMPAgent(common_agent.CommonAgent):
                     ar1_prior = torch.norm(error, dim=-1).mean()
                     info_dict["kin_ar1"] = ar1_prior
 
-                # 总损失
-                vq_coeff = getattr(humanoid_env, "vq_coeff", 1.0)
-                kin_loss = kin_action_loss + vq_loss * vq_coeff + ar1_prior * humanoid_env.ar1_coefficient
+                # ----------- 正则项 -----------
+                z_q = extra_dict['quantized_z_out']
+                z_b = extra_dict['z_before_quant']
+                regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
+                info_dict["kin_prior_regu"] = regu_prior
+
+                # ----------- 总损失函数 -----------
+                kin_loss = (
+                        kin_action_loss
+                        + vq_loss * getattr(humanoid_env, "vq_coeff", 0.01)
+                        + ar1_prior * humanoid_env.ar1_coefficient
+                        + regu_prior * 0.005
+                )
 
                 info_dict["kin_action_loss"] = kin_action_loss
-                info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_loss"] = kin_loss
+
 
 
 
