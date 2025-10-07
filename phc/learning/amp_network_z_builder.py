@@ -177,7 +177,8 @@ class AMPZBuilder(AMPBuilder):
                 if flags.test:
                     # print(f'\r {indexes[:self.embedding_partion].numpy()[12:16]}  ')
                     # print(f'\r { "".join([str(i) for i in indexes[:int(self.embedding_partion * 3/4)].numpy()]) } { "".join([str(i) for i in indexes[int(self.embedding_partion * 3/4):].numpy()]) }  ')
-                    print(f'\r {indexes[:self.embedding_partion].numpy()}  {self.quantizer.embedding.weight.norm(dim = -1 ).data.numpy()}  ')
+                    pass
+                    # print(f'\r {indexes[:self.embedding_partion].numpy()}  {self.quantizer.embedding.weight.norm(dim = -1 ).data.numpy()}  ')
                     # print(f'\r {indexes[:self.embedding_partion].numpy()} {indexes.unique().numpy()} {self.quantizer.embedding.weight.norm(dim = -1 ).data.numpy()}  ')
                  
                 else:
