@@ -240,7 +240,14 @@ class AMPZBuilder(AMPBuilder):
                     return project_to_norm(prior_mu, z_type="sphere", norm = self.embedding_norm), torch.ones_like(prior_mu) * self.vae_prior_fixed_logvar
                 else:
                     return prior_mu, torch.ones_like(prior_mu ) * self.vae_prior_fixed_logvar
-                    
+
+        def compute_vq_prior(self, obs_dict):
+            obs = obs_dict['obs']
+            self_obs = obs[:, :self.self_obs_size]
+
+            prior_latent = self.z_prior(self_obs)
+            prior_mu = self.z_prior_mu(prior_latent)
+            return prior_mu
            
         
         def reparameterize(self, mu, logvar):
@@ -536,6 +543,14 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == 'vq_vae':
                 self.quantizer = Quantizer(self.dict_size, self.embedding_size//self.embedding_partion, 0.25)
                 # self.quantizer = EMAVectorQuantizer(self.dict_size, self.embedding_size//4, 0.25, decay = 0.99)
+                mlp_args = {'input_size': self_obs_size, 'units': self._task_units, 'activation': self._task_activation,
+                            'dense_func': torch.nn.Linear}
+                self.z_prior = self._build_mlp(**mlp_args)
+                self.z_prior_mu = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)
+                # self.z_prior_logvar = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)
+                init_mlp(self.z_prior, mlp_init)
+                init_mlp(self.z_prior_mu, mlp_init)
+                # init_mlp(self.z_prior_logvar, mlp_init)
                 
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
