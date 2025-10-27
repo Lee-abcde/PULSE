@@ -149,10 +149,10 @@ class AMPZBuilder(AMPBuilder):
                 loss, task_out_proj, indexes = self.quantizer(z_before_quant.view(B, -1, self.embedding_size//self.embedding_partion))
                 task_out_proj = task_out_proj.view(B, self.embedding_size)
                 
-                # if flags.trigger_input:
-                #     flags.trigger_input = False
-                #     flags.debug = not flags.debug
-                #     enhance = 0.5
+                if flags.trigger_input:
+                    flags.trigger_input = False
+                    flags.debug = not flags.debug
+                    # enhance = 0.5
                 
                 if flags.debug:
                     if flags.trigger_input:
@@ -165,14 +165,16 @@ class AMPZBuilder(AMPBuilder):
                         flags.trigger_input = False
                     # import ipdb; ipdb.set_trace()
                     # self.debug_idxes =  self.embedding_size//self.embedding_partion, self.embedding_partion
-                    indexes = torch.tensor(self.debug_idxes)
-                    embedding = self.quantizer.embedding.weight.data
-                    fixed_task_out_proj = torch.cat([embedding[self.debug_idxes[idx]] for idx in range(len(self.debug_idxes))])[None, ]; print("   debugging",  end='')
+                    prior_mu = self.compute_vq_prior(obs_dict)
+                    _, z_out, _ = self.quantizer(prior_mu)
+                    # indexes = torch.tensor(self.debug_idxes)
+                    # embedding = self.quantizer.embedding.weight.data
+                    # fixed_task_out_proj = torch.cat([embedding[self.debug_idxes[idx]] for idx in range(len(self.debug_idxes))])[None, ]; print("   debugging",  end='')
                     
                     if self.z_all: ## pass thorugh
                         fixed_task_out_proj = torch.cat([fixed_task_out_proj[:, :int(self.embedding_size * 3/4 )], task_out_proj[:, int(self.embedding_size * 3/4):]], dim=-1)    
                         
-                    task_out_proj = fixed_task_out_proj
+                    task_out_proj = z_out
                     
                 if flags.test:
                     # print(f'\r {indexes[:self.embedding_partion].numpy()[12:16]}  ')
