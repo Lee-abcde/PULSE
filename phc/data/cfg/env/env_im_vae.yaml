@@ -20,7 +20,7 @@ eval_full: False
 
 embedding_norm: 1
 embedding_size: 32
-z_type: vae
+z_type: vq_pae
 use_vae_prior: True
 use_ar1_prior: True
 use_vae_clamped_prior: True
@@ -29,7 +29,7 @@ kld_coefficient: 0.01
 kld_coefficient_min: 0.001
 kld_anneal: True
 ar1_coefficient: 0.005
-
+window_size: 5
 
 ######## Getup Features. ########
 getup_schedule: False

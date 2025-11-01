@@ -75,7 +75,7 @@ class AMPAgent(common_agent.CommonAgent):
             self.freeze_state_weights()  # freeze the mean stds.
             load_my_state_dict(self.model.state_dict(), checkpoint['model'])  # loads everything (model, std, ect.). that can be load from the last model.
             # self.value_mean_std # not freezing value function though.
-        
+        self.window_size = self.vec_env.env.task.cfg.env.get("window_size", 5)
         return
     
     def set_stats_weights(self, weights):
@@ -347,17 +347,25 @@ class AMPAgent(common_agent.CommonAgent):
         update_list = self.update_list
         terminated_flags = torch.zeros(self.num_actors, device=self.device)
         reward_raw = torch.zeros(1, device=self.device)
+        # 初始化滑动窗口
+        W = self.window_size
+        obs_dim = self.obs['obs'].shape[-1]
+        self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
+        self.obs_window[:, -1, :] = self.obs['obs']
         for n in range(self.horizon_length):
 
             self.obs = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
+            if len(done_indices) > 0:
+                self.obs_window[done_indices] = 0.0
+                self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
                 res_dict = self.get_masked_action_values(self.obs, masks)
             else:
-                res_dict = self.get_action_values(self.obs)
-                
+                res_dict = self.get_action_values({'obs': self.obs_window})
+            self.experience_buffer.update_data('obs_window', n, self.obs_window)
             for k in update_list:
                 self.experience_buffer.update_data(k, n, res_dict[k])
 
@@ -369,7 +377,10 @@ class AMPAgent(common_agent.CommonAgent):
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
             else:
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
-                
+
+            self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
+            self.obs_window[:, -1, :] = self.obs['obs']
+
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
             self.experience_buffer.update_data('next_obses', n, self.obs['obs'])
@@ -427,6 +438,7 @@ class AMPAgent(common_agent.CommonAgent):
         mb_returns = mb_advs + mb_values
 
         batch_dict = self.experience_buffer.get_transformed_list(a2c_common.swap_and_flatten01, self.tensor_list)
+        batch_dict['obs_window'] = a2c_common.swap_and_flatten01(self.experience_buffer.tensor_dict['obs_window'])
         batch_dict['returns'] = a2c_common.swap_and_flatten01(mb_returns)
         batch_dict['terminated_flags'] = terminated_flags
         batch_dict['reward_raw'] =reward_raw / self.horizon_length
@@ -445,6 +457,7 @@ class AMPAgent(common_agent.CommonAgent):
         dataset_dict['amp_obs'] = batch_dict['amp_obs']
         dataset_dict['amp_obs_demo'] = batch_dict['amp_obs_demo']
         dataset_dict['amp_obs_replay'] = batch_dict['amp_obs_replay']
+        dataset_dict['obs_window'] = batch_dict['obs_window']
 
         if self.save_kin_info:
             dataset_dict['kin_dict'] = batch_dict['kin_dict']
@@ -592,13 +605,13 @@ class AMPAgent(common_agent.CommonAgent):
                 obs_batch = obs_batch.float() / 255.0
 
         if self.normalize_input:
-            obs_batch_proc = obs_batch[:, :self.running_mean_std.mean_size]
+            obs_batch_proc = obs_batch[..., :self.running_mean_std.mean_size]  # (B, W, mean_size)
             if use_temp:
                 obs_batch_out = self.running_mean_std_temp(obs_batch_proc)
                 obs_batch_orig = self.running_mean_std(obs_batch_proc)  # running through mean std, but do not use its value. use temp
             else:
                 obs_batch_out = self.running_mean_std(obs_batch_proc)  # running through mean std, but do not use its value. use temp
-            obs_batch_out = torch.cat([obs_batch_out, obs_batch[:, self.running_mean_std.mean_size:]], dim=-1)
+            obs_batch_out = torch.cat([obs_batch_out, obs_batch[...,  self.running_mean_std.mean_size:]], dim=-1)
 
         return obs_batch_out
 
@@ -614,7 +627,10 @@ class AMPAgent(common_agent.CommonAgent):
         old_sigma_batch = input_dict['sigma']
         return_batch = input_dict['returns']
         actions_batch = input_dict['actions']
-        obs_batch = input_dict['obs']
+        if 'obs_window' in input_dict and input_dict['obs_window'] is not None:
+            obs_batch = input_dict['obs_window'].reshape(input_dict['obs_window'].shape[0], self.window_size, -1)
+        else:
+            obs_batch = input_dict['obs']
         obs_batch_processed = self._preproc_obs(obs_batch, use_temp=self.temp_running_mean)
         input_dict['obs_processed'] = obs_batch_processed
 
@@ -883,8 +899,57 @@ class AMPAgent(common_agent.CommonAgent):
 
                 info_dict["kin_action_loss"] = kin_action_loss
                 info_dict["kin_loss"] = kin_loss
+            elif humanoid_env.z_type == "vq_pae":
+                pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
+                # ----------- 动作重建损失 -----------
+                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()
 
+                # ----------- 从模型中直接拿 VQ 损失 -----------
+                vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
+                info_dict["kin_vq_loss"] = vq_loss
 
+                # ----------- AR1 连续性约束（可选）-----------
+                ar1_prior = 0
+                if humanoid_env.use_ar1_prior:
+                    time_zs = extra_dict['quantized_z_out'].view(
+                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                    )
+                    phi = 0.99
+                    error = time_zs[:, 1:] - time_zs[:, :-1] * phi
+                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                                                          self.horizon_length, -1)
+                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                    error = error.view(-1, error.shape[-1])
+                    error[not_consecs] = 0
+                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
+                    error[starteres] = 0
+                    ar1_prior = torch.norm(error, dim=-1).mean()
+                    info_dict["kin_ar1"] = ar1_prior
+
+                # ----------- 正则项 -----------
+                z_q = extra_dict['quantized_z_out']
+                z_b = extra_dict['z_before_quant']
+                regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
+                info_dict["kin_prior_regu"] = regu_prior
+
+                # ----------- 总损失函数 -----------
+                kin_loss = (
+                        kin_action_loss
+                        + vq_loss * getattr(humanoid_env, "vq_coeff", 0.01)
+                        + ar1_prior * humanoid_env.ar1_coefficient
+                        + regu_prior * 0.005
+                )
+
+                info_dict["kin_action_loss"] = kin_action_loss
+                info_dict["kin_loss"] = kin_loss
+                if torch.isnan(kin_loss).any() or torch.isinf(kin_loss).any():
+                    print("!!! 致命错误: 训练损失（kin_loss）变成了 nan 或 inf !!!")
+                    print(f"kin_action_loss: {kin_action_loss}")
+                    print(f"vq_loss: {vq_loss}")
+                    print(f"ar1_prior: {ar1_prior}")
+                    print(f"regu_prior: {regu_prior}")
+                    import ipdb;
+                    ipdb.set_trace()  # 在这里停住
 
 
 

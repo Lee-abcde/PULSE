@@ -8,6 +8,8 @@ import numpy as np
 from phc.utils.torch_utils import project_to_norm
 from phc.learning.vq_quantizer import EMAVectorQuantizer, Quantizer
 from phc.utils.flags import flags
+from learning.vq_pae_modules import *
+from functools import partial
 DISC_LOGIT_INIT_SCALE = 1.0
 
 
@@ -36,7 +38,9 @@ class AMPZBuilder(AMPBuilder):
             self.dict_size = self.task_obs_size_detail.get("dict_size", 512)
             self.z_all = self.task_obs_size_detail.get("z_all", False)
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
-            
+            # VQ-PAE
+            self.window_size = kwargs['window_size']
+
             self.use_vae_prior = self.task_obs_size_detail.get("use_vae_prior", False)
             self.use_vae_fixed_prior = self.task_obs_size_detail.get("use_vae_fixed_prior", False)
             self.use_vae_clamped_prior = self.task_obs_size_detail.get("use_vae_clamped_prior", False)
@@ -75,10 +79,57 @@ class AMPZBuilder(AMPBuilder):
             self._task_activation = params['task_mlp']['activation']
             self._task_initializer = params['task_mlp']['initializer']
             return
-        
+
+        def get_phase_manifold(self, state, angles):
+            """
+            :param state: (batch_size, n_channel_latent)
+            :param angles: (batch_size, n_channel_phase, time_range)
+            :return:
+            """
+            state = state.reshape((state.shape[0], angles.shape[1], -1, 2))
+            y0 = torch.cos(angles)
+            y1 = torch.sin(angles)
+            y = torch.stack((y0, y1), dim=-2)
+            signal = y
+            y = state @ y
+            y = y.reshape(y.shape[0], -1, y.shape[-1])
+            return y, signal
+
+        def fft_with_nn(self, func, dim):
+            amp = torch.std(func, dim=dim) * np.sqrt(2)
+            amp = torch.ones_like(amp)
+            offset = torch.mean(func, dim=dim)
+
+            rfft = torch.fft.rfft(func, dim=dim) / self.window_size * 2
+            rfft = rfft.abs() ** 2
+            func = rfft
+
+            freq = self.freq_fc(func).squeeze(-1)
+
+            return freq, amp, offset
+
+        def analytical_phase(self, latent, f, b):
+            b = b.unsqueeze(-1)
+            f = f.unsqueeze(-1)
+
+            y = latent - b
+            sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
+            sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
+            p = -torch.atan2(sy, sx) / self.tpi
+            return p
+
+        def pae(self, latent):
+            latent1d = self.phase_conv(latent)
+            f, a, b = self.fft_with_nn(latent1d, dim=2)
+            p = self.analytical_phase(latent1d, f, b)
+            return f, a, b, p
+
         def form_embedding(self, task_out_z, obs_dict = None):
             extra_dict = {}
-            B, N = task_out_z.shape
+            if task_out_z.dim() == 2:
+                B, N = task_out_z.shape
+            elif task_out_z.dim() == 3:
+                B, W, F = task_out_z.shape
             if self.z_type == 'vae':
                 self.vae_mu = vae_mu = self.z_mu(task_out_z)
                 self.vae_log_var = vae_log_var = self.z_logvar(task_out_z)
@@ -221,7 +272,29 @@ class AMPZBuilder(AMPBuilder):
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": z_before_quant, "quantized_z_out": task_out_proj}
             elif self.z_type == "sphere":
                 task_out_proj = project_to_norm(task_out_z, norm=self.embedding_norm, z_type=self.z_type)
-                
+            elif self.z_type == "vq_pae":
+                x = task_out_z.transpose(1, 2)  # (B, D, W)
+                latent = self.z_encoder(x)
+                # ---- Phase Prediction ----
+                f, a, b, p = self.pae(latent)
+
+                state_input = latent.mean(axis=-1)
+                state = self.state_fc(state_input)
+                state_ori = state
+
+
+                loss, state, indexes = self.quantizer(state)
+
+                angles = self.tpi * (f.unsqueeze(-1) * self.args + p.unsqueeze(-1))
+
+                y, signal = self.get_phase_manifold(state, angles)
+                manifold = y
+                manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
+                # task_out_proj = self.deconvs(y)
+                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
+                              "quantized_z_out": manifold[..., -1]}
+                return manifold[..., -1], extra_dict
+
             # print(task_out_proj.max(), task_out_proj.min())
             return task_out_proj, extra_dict
         
@@ -275,6 +348,8 @@ class AMPZBuilder(AMPBuilder):
         def eval_critic(self, obs_dict):
 
             obs = obs_dict['obs']
+            if obs.dim() == 3:
+                obs = obs[:, -1, :]
             c_out = self.critic_cnn(obs)
             c_out = c_out.contiguous().view(c_out.size(0), -1)
             seq_length = obs_dict.get('seq_length', 1)
@@ -356,8 +431,8 @@ class AMPZBuilder(AMPBuilder):
             a_out = self.actor_cnn(obs)  # This is empty
             a_out = a_out.contiguous().view(a_out.size(0), -1)
 
-            self_obs = obs[:, :self.self_obs_size]
-            task_obs = obs[:, self.self_obs_size:]
+            self_obs = obs[:, -1, :self.self_obs_size]
+            # task_obs = obs[:, self.self_obs_size:]
             assert (obs.shape[-1] == self.self_obs_size + self.task_obs_size)
             
             if self.has_rnn:
@@ -437,9 +512,12 @@ class AMPZBuilder(AMPBuilder):
                 #     task_out_z = torch.cat([task_out_z, self_out_z], dim=-1)
                 # else:
                 #     task_out_z = self.z_mlp(obs)
-                
-                task_out_z = self.z_mlp(obs)
-                
+
+                if self.z_type != 'vq_pae':
+                    task_out_z = self.z_mlp(obs)
+                else:
+                    task_out_z = obs
+
                 if self.proj_norm:
                     z_out, extra_dict = self.form_embedding(task_out_z, obs_dict)
                 
@@ -553,7 +631,77 @@ class AMPZBuilder(AMPBuilder):
                 init_mlp(self.z_prior, mlp_init)
                 init_mlp(self.z_prior_mu, mlp_init)
                 # init_mlp(self.z_prior_logvar, mlp_init)
-                
+            elif self.z_type == 'vq_pae':
+                input_dim = self_obs_size + task_obs_size
+                # --- PATH 1: Build the VQ-PAE Sequence Model ---
+
+                # --- Get VQ-PAE hyperparameters from config (self) ---
+                # (These are example values; you MUST set them in your config)
+                self.pae_latent_channels = self.embedding_size
+                self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
+                self.pae_n_layers = getattr(self, 'pae_n_layers', 3)
+                self.pae_kernel_size = getattr(self, 'pae_kernel_size', 5)
+                self.pae_n_layers_fft = getattr(self, 'pae_n_layers_fft', 3)
+                self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
+
+                # This is the VQ dimension (output of state_fc, input to VQ)
+                # We'll set it to be self.embedding_size
+                self.num_embed = 2 * self.pae_latent_channels
+
+                self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
+                self.args = nn.Parameter(
+                    torch.linspace(-self.window_size / 2, self.window_size / 2, self.window_size, dtype=torch.float32),
+                    requires_grad=False
+                )
+                # ---- 1. Conv1d Encoder ----
+                # Takes [B, D, W] and maps to [B, pae_latent_channels, W]
+                encoder_channels = [input_dim] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.pae_latent_channels]
+                normalizer = partial(LN_v3, keep_std=True)
+                self.z_encoder = []
+                for i in range(self.pae_n_layers):
+                    self.z_encoder.append(nn.Conv1d(encoder_channels[i], encoder_channels[i + 1],
+                                                    self.pae_kernel_size, padding='same'))
+                    self.z_encoder.append(normalizer(self.window_size)) # Requires normalizer
+                    self.z_encoder.append(nn.ELU())
+                self.z_encoder = nn.Sequential(*self.z_encoder)
+
+                # ---- 2. Phase Convolution ----
+                # Takes [B, pae_latent_channels, W] -> [B, n_timing_phases, W]
+                self.phase_conv = nn.Conv1d(self.pae_latent_channels, self.n_timing_phases,
+                                              self.pae_kernel_size, padding='same')
+
+                # ---- 3. Frequency MLP (from FFT) ----
+                # Input to FFT is [B, n_timing_phases, W]
+                # FFT output is [B, n_timing_phases, W//2 + 1]
+                fft_in_length = self.window_size // 2 + 1
+                # (Assuming MLP class is defined elsewhere)
+                self.freq_fc = MLP(self.pae_n_layers_fft, fft_in_length, 1, 1, bn=False, last_activation=True)
+                init_mlp(self.freq_fc, mlp_init)
+
+                # ---- 4. State MLP (from latent mean) ----
+                # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
+                # Output is shape [B, pae_state_dim] (which is self.embedding_size)
+                n_latent_channels = self.pae_latent_channels
+                n_layers_state = getattr(self, 'pae_n_layers_state', 2)  # define how many FC layers (configurable)
+                n_channels_state_mlp = [n_latent_channels] + [self.num_embed] * n_layers_state
+                self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
+                init_mlp(self.state_fc, mlp_init)
+
+                # ---- 5. Vector Quantizer ----
+                quantizer_dim = self.num_embed
+                self.quantizer = Quantizer(self.dict_size, quantizer_dim, 0.25)
+
+                # self.deconvs = []
+                # decoder_channels = encoder_channels[::-1]
+                # for i in range(self.pae_n_layers):
+                #     self.deconvs.append(nn.Conv1d(decoder_channels[i], decoder_channels[i + 1],
+                #                                   self.pae_kernel_size, padding='same'))
+                #     if i != self.pae_n_layers - 1:
+                #         self.deconvs.append(normalizer(self.window_size))  # Use window_size
+                #         self.deconvs.append(nn.ELU())
+                # self.deconvs = nn.Sequential(*self.deconvs)
+                # init_mlp(self.deconvs, mlp_init)  # Initialize the decoder
+
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
                 self.z_var = nn.Linear(in_features=self.embedding_size * 5, out_features=int(1))

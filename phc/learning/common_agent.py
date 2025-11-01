@@ -94,7 +94,13 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['next_obses'] = torch.zeros_like(self.experience_buffer.tensor_dict['obses'])
         self.experience_buffer.tensor_dict['next_values'] = torch.zeros_like(self.experience_buffer.tensor_dict['values'])
 
-        self.tensor_list += ['next_obses']
+        window_size = self.vec_env.env.task.cfg.env.get("window_size", 1)
+        obs_dim = self.obs_shape[0]
+        buffer_shape = (self.horizon_length, self.num_actors, window_size, obs_dim)
+        self.experience_buffer.tensor_dict['obs_window'] = torch.zeros(
+            buffer_shape, dtype=torch.float32, device=self.ppo_device
+        )
+        self.tensor_list += ['next_obses', 'obs_window']
         return
 
     def train(self):
@@ -533,6 +539,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
             'input_shape': obs_shape,
             'num_seqs': self.num_actors * self.num_agents,
             'value_size': self.env_info.get('value_size', 1),
+            'window_size': self.vec_env.env.task.cfg.env.get("window_size", 5)
         }
         return config
 
