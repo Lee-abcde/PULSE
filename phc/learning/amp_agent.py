@@ -936,8 +936,6 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + ar1_prior * humanoid_env.ar1_coefficient
-                        + regu_prior * 0.005
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss
