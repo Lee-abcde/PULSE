@@ -141,9 +141,9 @@ class AMPPlayerContinuous(common_player.CommonPlayer):
             if obs_batch.dtype == torch.uint8:
                 obs_batch = obs_batch.float() / 255.0
         if self.normalize_input:
-            obs_batch_proc = obs_batch[:, :self.running_mean_std.mean_size]
+            obs_batch_proc = obs_batch[..., :self.running_mean_std.mean_size]
             obs_batch_out = self.running_mean_std(obs_batch_proc)
-            obs_batch = torch.cat([obs_batch_out, obs_batch[:, self.running_mean_std.mean_size:]], dim=-1)
+            obs_batch = torch.cat([obs_batch_out, obs_batch[..., self.running_mean_std.mean_size:]], dim=-1)
             
         return obs_batch
     

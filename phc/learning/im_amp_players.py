@@ -244,11 +244,18 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
 
             done_indices = []
 
+            W = self.window_size
+            obs_dim = obs_dict['obs'].shape[-1]
+            self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
+            self.obs_window[:, -1, :] = obs_dict['obs']
             with torch.no_grad():
                 for n in range(self.max_steps):
                     obs_dict = self.env_reset(done_indices)
 
-
+                    if (isinstance(done_indices, list) and len(done_indices) > 0) or \
+                            (not isinstance(done_indices, list) and done_indices.numel() > 0):
+                        self.obs_window[done_indices] = 0.0
+                        self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
                     if COLLECT_Z: z = self.get_z(obs_dict)
                         
 
@@ -256,9 +263,12 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         masks = self.env.get_action_mask()
                         action = self.get_masked_action(obs_dict, masks, is_determenistic)
                     else:
-                        action = self.get_action(obs_dict, is_determenistic)
+                        action = self.get_action({'obs': self.obs_window}, is_determenistic)
 
                     obs_dict, r, done, info = self.env_step(self.env, action)
+
+                    self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
+                    self.obs_window[:, -1, :] = obs_dict
 
                     cr += r
                     steps += 1

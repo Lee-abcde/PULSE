@@ -20,7 +20,7 @@ class CommonPlayer(players.PpoPlayerContinuous):
         self.mask = [False]
 
         self.normalize_input = self.config['normalize_input']
-
+        self.window_size = self.config['window_size']
         net_config = self._build_net_config()
         self._build_net(net_config)
         self.first = True
@@ -198,7 +198,7 @@ class CommonPlayer(players.PpoPlayerContinuous):
 
     def _build_net_config(self):
         obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
-        config = {'actions_num': self.actions_num, 'input_shape': obs_shape, 'num_seqs': self.num_agents}
+        config = {'actions_num': self.actions_num, 'input_shape': obs_shape, 'num_seqs': self.num_agents, 'window_size': self.window_size}
         return config
 
     def _setup_action_space(self):

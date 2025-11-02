@@ -104,3 +104,4 @@ params:
 
     player: 
       games_num: 50000000
+    window_size: 5
