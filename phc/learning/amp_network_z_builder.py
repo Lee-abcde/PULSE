@@ -645,49 +645,40 @@ class AMPZBuilder(AMPBuilder):
                 init_mlp(self.z_prior_mu, mlp_init)
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
-                input_dim = self_obs_size + task_obs_size
-                # --- PATH 1: Build the VQ-PAE Sequence Model ---
-
-                # --- Get VQ-PAE hyperparameters from config (self) ---
-                # (These are example values; you MUST set them in your config)
-                self.pae_latent_channels = self.embedding_size
+                self.n_input_channels = self_obs_size + task_obs_size
+                self.n_latent_channels = self.embedding_size
                 self.window = getattr(self, 'window', 1)
                 self.time_range = self.window_size
-                self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
-                self.pae_n_layers = getattr(self, 'pae_n_layers', 3)
-                self.pae_kernel_size = getattr(self, 'pae_kernel_size', 5)
-                self.pae_n_layers_fft = getattr(self, 'pae_n_layers_fft', 3)
                 self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
 
-                # This is the VQ dimension (output of state_fc, input to VQ)
-                # We'll set it to be self.embedding_size
-                self.num_embed = 2 * self.pae_latent_channels
+                self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
+                self.pae_n_layers = getattr(self, 'pae_n_layers', 2)
+                self.pae_kernel_size = getattr(self, 'pae_kernel_size', 5)
+                self.pae_n_layers_fft = getattr(self, 'pae_n_layers_fft', 7)
+                n_layers_state = getattr(self, 'pae_n_layers_state', 5)
+
+                self.num_embed = 2 * self.n_latent_channels
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(
-                    torch.linspace(-self.window / 2, self.window / 2, self.time_range, dtype=torch.float32),
-                    requires_grad=False
-                )
-                # ---- 1. Conv1d Encoder ----
-                # Takes [B, D, W] and maps to [B, pae_latent_channels, W]
-                encoder_channels = [input_dim] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.pae_latent_channels]
+                    torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
+                                                 dtype=np.float32)), requires_grad=False)
+
+                encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
                 normalizer = partial(LN_v3, keep_std=True)
                 self.z_encoder = []
                 for i in range(self.pae_n_layers):
                     self.z_encoder.append(nn.Conv1d(encoder_channels[i], encoder_channels[i + 1],
                                                     self.pae_kernel_size, padding='same'))
-                    self.z_encoder.append(normalizer(self.window_size)) # Requires normalizer
+                    self.z_encoder.append(normalizer(self.time_range)) # Requires normalizer
                     self.z_encoder.append(nn.ELU())
                 self.z_encoder = nn.Sequential(*self.z_encoder)
 
                 # ---- 2. Phase Convolution ----
                 # Takes [B, pae_latent_channels, W] -> [B, n_timing_phases, W]
-                self.phase_conv = nn.Conv1d(self.pae_latent_channels, self.n_timing_phases,
-                                              self.pae_kernel_size, padding='same')
+                self.phase_conv = nn.Sequential(nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
                 # ---- 3. Frequency MLP (from FFT) ----
-                # Input to FFT is [B, n_timing_phases, W]
-                # FFT output is [B, n_timing_phases, W//2 + 1]
                 fft_in_length = self.window_size // 2 + 1
                 # (Assuming MLP class is defined elsewhere)
                 self.freq_fc = MLP(self.pae_n_layers_fft, fft_in_length, 1, 1, bn=False, last_activation=True)
@@ -696,15 +687,12 @@ class AMPZBuilder(AMPBuilder):
                 # ---- 4. State MLP (from latent mean) ----
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
                 # Output is shape [B, pae_state_dim] (which is self.embedding_size)
-                n_latent_channels = self.pae_latent_channels
-                n_layers_state = getattr(self, 'pae_n_layers_state', 2)  # define how many FC layers (configurable)
-                n_channels_state_mlp = [n_latent_channels] + [self.num_embed] * n_layers_state
+                 # define how many FC layers (configurable)
+                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
-                init_mlp(self.state_fc, mlp_init)
 
                 # ---- 5. Vector Quantizer ----
-                quantizer_dim = self.num_embed
-                self.quantizer = Quantizer(self.dict_size, quantizer_dim, 0.25)
+                self.quantizer = Quantizer(self.dict_size, self.num_embed, 0.25)
 
                 # self.deconvs = []
                 # decoder_channels = encoder_channels[::-1]
