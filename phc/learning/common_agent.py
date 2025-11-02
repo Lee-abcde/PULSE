@@ -538,7 +538,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
             'input_shape': obs_shape,
             'num_seqs': self.num_actors * self.num_agents,
             'value_size': self.env_info.get('value_size', 1),
-            'window_size': self.vec_env.env.task.cfg.env.get("window_size", 5)
+            'window_size': self.cfg.window_size
         }
         return config
 
