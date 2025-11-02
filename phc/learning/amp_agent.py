@@ -75,7 +75,7 @@ class AMPAgent(common_agent.CommonAgent):
             self.freeze_state_weights()  # freeze the mean stds.
             load_my_state_dict(self.model.state_dict(), checkpoint['model'])  # loads everything (model, std, ect.). that can be load from the last model.
             # self.value_mean_std # not freezing value function though.
-        self.window_size = self.vec_env.env.task.cfg.env.get("window_size", 5)
+        self.window_size = self.cfg.window_size
         return
     
     def set_stats_weights(self, weights):
