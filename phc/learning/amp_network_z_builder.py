@@ -682,7 +682,6 @@ class AMPZBuilder(AMPBuilder):
                 fft_in_length = self.window_size // 2 + 1
                 # (Assuming MLP class is defined elsewhere)
                 self.freq_fc = MLP(self.pae_n_layers_fft, fft_in_length, 1, 1, bn=False, last_activation=True)
-                init_mlp(self.freq_fc, mlp_init)
 
                 # ---- 4. State MLP (from latent mean) ----
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
