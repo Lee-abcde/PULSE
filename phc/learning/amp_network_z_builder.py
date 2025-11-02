@@ -100,7 +100,7 @@ class AMPZBuilder(AMPBuilder):
             amp = torch.ones_like(amp)
             offset = torch.mean(func, dim=dim)
 
-            rfft = torch.fft.rfft(func, dim=dim) / self.window_size * 2
+            rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
             rfft = rfft.abs() ** 2
             func = rfft
 
@@ -638,6 +638,8 @@ class AMPZBuilder(AMPBuilder):
                 # --- Get VQ-PAE hyperparameters from config (self) ---
                 # (These are example values; you MUST set them in your config)
                 self.pae_latent_channels = self.embedding_size
+                self.window = getattr(self, 'window', 1)
+                self.time_range = self.window_size
                 self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
                 self.pae_n_layers = getattr(self, 'pae_n_layers', 3)
                 self.pae_kernel_size = getattr(self, 'pae_kernel_size', 5)
@@ -650,7 +652,7 @@ class AMPZBuilder(AMPBuilder):
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(
-                    torch.linspace(-self.window_size / 2, self.window_size / 2, self.window_size, dtype=torch.float32),
+                    torch.linspace(-self.window / 2, self.window / 2, self.time_range, dtype=torch.float32),
                     requires_grad=False
                 )
                 # ---- 1. Conv1d Encoder ----
