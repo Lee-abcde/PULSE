@@ -285,6 +285,19 @@ class AMPZBuilder(AMPBuilder):
 
                 loss, state, indexes = self.quantizer(state)
 
+                if flags.trigger_input:
+                    flags.trigger_input = False
+                    flags.debug = not flags.debug
+
+                if flags.debug:
+                    print(indexes)
+                    # B = state.shape[0]
+                    # debug_index = 1000  # 默认为 0
+                    #
+                    # # 为 batch 中的每个样本强制使用这个索引
+                    # debug_indices = torch.full((B,), fill_value=debug_index,
+                    #                            dtype=torch.long, device=state.device)
+                    # state = self.quantizer.embedding(debug_indices)
                 angles = self.tpi * (f.unsqueeze(-1) * self.args + p.unsqueeze(-1))
 
                 y, signal = self.get_phase_manifold(state, angles)
