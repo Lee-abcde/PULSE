@@ -911,12 +911,10 @@ class AMPAgent(common_agent.CommonAgent):
                 # ----------- AR1 连续性约束（可选）-----------
                 ar1_prior = 0
                 if humanoid_env.use_ar1_prior:
-                    time_zs = extra_dict['state_after_quant'].view(
+                    time_zs = extra_dict['quantized_z_out'].view(
                         self.minibatch_size // self.horizon_length, self.horizon_length, -1
                     )
-                    import ipdb; ipdb.set_trace()
-                    phi = 0.99
-                    error = time_zs[:, 1:] - time_zs[:, :-1] * phi
+                    error = time_zs[:, 1:] - time_zs[:, :-1]
                     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                           self.horizon_length, -1)
                     not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
@@ -926,6 +924,22 @@ class AMPAgent(common_agent.CommonAgent):
                     error[starteres] = 0
                     ar1_prior = torch.norm(error, dim=-1).mean()
                     info_dict["kin_ar1"] = ar1_prior
+                # ----------- AR1 连续性约束 for state -----------
+                pred_state = extra_dict['state_after_quant']
+                # reshape to [B, T, state_dim]
+                time_states = pred_state.view(self.minibatch_size // self.horizon_length,
+                                              self.horizon_length, -1)
+                # difference between consecutive frames
+                state_diff = time_states[:, 1:] - time_states[:, :-1]
+                # optionally, mask out discontinuous episodes
+                idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                                                      self.horizon_length, -1)
+                not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                state_diff = state_diff.view(-1, state_diff.shape[-1])
+                state_diff[not_consecs] = 0
+                # L2 penalty on difference (encourages temporal smoothness)
+                state_smooth_loss = torch.norm(state_diff, dim=-1).mean()
+                info_dict["kin_state_smooth"] = state_smooth_loss
 
                 # ----------- 正则项 -----------
                 z_q = extra_dict['quantized_z_out']
@@ -937,6 +951,7 @@ class AMPAgent(common_agent.CommonAgent):
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         + ar1_prior * humanoid_env.ar1_coefficient
+                        + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + regu_prior * 0.005
                 )
 
