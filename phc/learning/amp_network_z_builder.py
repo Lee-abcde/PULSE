@@ -40,6 +40,7 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
+            self.debug_phase_p = torch.zeros((1, 1), device='cuda')
 
             self.use_vae_prior = self.task_obs_size_detail.get("use_vae_prior", False)
             self.use_vae_fixed_prior = self.task_obs_size_detail.get("use_vae_fixed_prior", False)
@@ -290,14 +291,18 @@ class AMPZBuilder(AMPBuilder):
                     flags.debug = not flags.debug
 
                 if flags.debug:
-                    print(indexes)
-                    # B = state.shape[0]
-                    # debug_index = 1000  # 默认为 0
-                    #
-                    # # 为 batch 中的每个样本强制使用这个索引
-                    # debug_indices = torch.full((B,), fill_value=debug_index,
-                    #                            dtype=torch.long, device=state.device)
-                    # state = self.quantizer.embedding(debug_indices)
+                    B = state.shape[0]
+                    debug_index = 26  # 默认为 0
+
+                    # 为 batch 中的每个样本强制使用这个索引
+                    debug_indices = torch.full((B,), fill_value=debug_index,
+                                               dtype=torch.long, device=state.device)
+                    state = self.quantizer.embedding(debug_indices)
+
+                    f = torch.tensor([[0.2]], device=state.device)  # fixed frequency
+                    self.debug_phase_p += f * 0.03  # increment per step (adjust step size)
+                    p = self.debug_phase_p.clone()  # current phase offset
+                    print(indexes, p)
                 angles = self.tpi * (f.unsqueeze(-1) * self.args + p.unsqueeze(-1))
 
                 y, signal = self.get_phase_manifold(state, angles)
