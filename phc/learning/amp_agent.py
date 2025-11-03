@@ -909,21 +909,21 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_vq_loss"] = vq_loss
 
                 # ----------- AR1 连续性约束（可选）-----------
-                ar1_prior = 0
-                if humanoid_env.use_ar1_prior:
-                    time_zs = extra_dict['quantized_z_out'].view(
-                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
-                    )
-                    error = time_zs[:, 1:] - time_zs[:, :-1]
-                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
-                                                          self.horizon_length, -1)
-                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
-                    error = error.view(-1, error.shape[-1])
-                    error[not_consecs] = 0
-                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
-                    error[starteres] = 0
-                    ar1_prior = torch.norm(error, dim=-1).mean()
-                    info_dict["kin_ar1"] = ar1_prior
+                # ar1_prior = 0
+                # if humanoid_env.use_ar1_prior:
+                #     time_zs = extra_dict['quantized_z_out'].view(
+                #         self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                #     )
+                #     error = time_zs[:, 1:] - time_zs[:, :-1]
+                #     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                #                                           self.horizon_length, -1)
+                #     not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                #     error = error.view(-1, error.shape[-1])
+                #     error[not_consecs] = 0
+                #     starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
+                #     error[starteres] = 0
+                #     ar1_prior = torch.norm(error, dim=-1).mean()
+                #     info_dict["kin_ar1"] = ar1_prior
                 # ----------- AR1 连续性约束 for state -----------
                 pred_state = extra_dict['state_after_quant']
                 # reshape to [B, T, state_dim]
@@ -949,9 +949,9 @@ class AMPAgent(common_agent.CommonAgent):
                 # ----------- 总损失函数 -----------
                 kin_loss = (
                         kin_action_loss
-                        + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + ar1_prior * humanoid_env.ar1_coefficient
-                        + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
+                        + vq_loss * getattr(humanoid_env, "vq_coeff", 1e-2)
+                        # + ar1_prior * humanoid_env.ar1_coefficient
+                        + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.5)
                         + regu_prior * 0.005
                 )
 
