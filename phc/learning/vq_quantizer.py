@@ -12,9 +12,9 @@ class Quantizer(nn.Module):
         self.beta = beta
 
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
-        # self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
         # self.embedding.weight.data.uniform_(-1.0 / 2, 1.0 / 2)
-        self.embedding.weight.data.uniform_(-1.0 / 256, 1.0 / 256)
+        # self.embedding.weight.data.uniform_(-1.0 / 256, 1.0 / 256)
         # self.embedding.weight.data = self.embedding.weight.data/self.embedding.weight.data.norm(dim = -1, keepdim=True)  # project to sphere
         # self.embedding.weight.data[:] *= 10
         

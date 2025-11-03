@@ -310,7 +310,7 @@ class AMPZBuilder(AMPBuilder):
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1]}
+                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state}
                 return manifold[..., -1], extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
