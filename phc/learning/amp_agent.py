@@ -941,18 +941,18 @@ class AMPAgent(common_agent.CommonAgent):
                 state_smooth_loss = torch.norm(state_diff, dim=-1).mean()
                 info_dict["kin_state_smooth"] = state_smooth_loss
 
-                # ----------- 正则项 -----------
-                z_q = extra_dict['quantized_z_out']
-                z_b = extra_dict['z_before_quant']
-                regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
-                info_dict["kin_prior_regu"] = regu_prior
+                # # ----------- 正则项 -----------
+                # z_q = extra_dict['quantized_z_out']
+                # z_b = extra_dict['z_before_quant']
+                # regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
+                # info_dict["kin_prior_regu"] = regu_prior
                 # ----------- 总损失函数 -----------
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 0.1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.5)
-                        + regu_prior * 0.005
+                        # + regu_prior * 0.005
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss
