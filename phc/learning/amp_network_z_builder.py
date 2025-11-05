@@ -40,7 +40,10 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
-            self.debug_phase_p = torch.zeros((1, 1), device='cuda')
+            self.top_phase = 0.48
+            self.botton_phase = 0.29
+            self.debug_index = 39
+            self.debug_phase_p = torch.full((1, 1), self.botton_phase , device='cuda')
 
             self.use_vae_prior = self.task_obs_size_detail.get("use_vae_prior", False)
             self.use_vae_fixed_prior = self.task_obs_size_detail.get("use_vae_fixed_prior", False)
@@ -285,24 +288,29 @@ class AMPZBuilder(AMPBuilder):
 
 
                 loss, state, indexes = self.quantizer(state)
-
+                # print(indexes, f, p)
                 if flags.trigger_input:
                     flags.trigger_input = False
                     flags.debug = not flags.debug
-
+                    # self.debug_index += 1
+                # print(indexes, f, p)
                 if flags.debug:
                     B = state.shape[0]
-                    debug_index = 26  # 默认为 0
-
+                      # 默认为 0
+                    print(self.debug_index, f, p)
                     # 为 batch 中的每个样本强制使用这个索引
-                    debug_indices = torch.full((B,), fill_value=debug_index,
+                    debug_indices = torch.full((B,), fill_value=self.debug_index,
                                                dtype=torch.long, device=state.device)
                     state = self.quantizer.embedding(debug_indices)
 
-                    f = torch.tensor([[0.2]], device=state.device)  # fixed frequency
-                    self.debug_phase_p += f * 0.03  # increment per step (adjust step size)
+                    f = torch.tensor([[1.5]], device=state.device)  # fixed frequency
+                    self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
+                    self.debug_phase_p = torch.where(
+                        self.debug_phase_p > self.top_phase,
+                        torch.full_like(self.debug_phase_p, self.botton_phase),  # 大于 0.15 时置为 -0.5
+                        self.debug_phase_p  # 否则保持原值
+                    )
                     p = self.debug_phase_p.clone()  # current phase offset
-                    print(indexes, p)
                 angles = self.tpi * (f.unsqueeze(-1) * self.args + p.unsqueeze(-1))
 
                 y, signal = self.get_phase_manifold(state, angles)
