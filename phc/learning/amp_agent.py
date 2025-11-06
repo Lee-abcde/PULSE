@@ -349,16 +349,13 @@ class AMPAgent(common_agent.CommonAgent):
         reward_raw = torch.zeros(1, device=self.device)
         # 初始化滑动窗口
         W = self.window_size
-        obs_dim = self.obs['obs'].shape[-1]
-        self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
-        self.obs_window[:, -1, :] = self.obs['obs']
+        self.obs_window = self.obs['obs'].unsqueeze(1).repeat(1, W, 1)
         for n in range(self.horizon_length):
 
             self.obs = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
             if len(done_indices) > 0:
-                self.obs_window[done_indices] = 0.0
-                self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
+                self.obs_window[done_indices] = self.obs['obs'][done_indices].unsqueeze(1).repeat(1, W, 1)
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()

@@ -189,9 +189,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
         batch_size = humanoid_env.num_envs
 
         W = self.window_size
-        obs_dim = obs_dict['obs'].shape[-1]
-        self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
-        self.obs_window[:, -1, :] = obs_dict['obs']
+        self.obs_window = self.obs['obs'].unsqueeze(1).repeat(1, W, 1)
 
         if need_init_rnn:
             self.init_rnn()
@@ -208,8 +206,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
 
                 if (isinstance(done_indices, list) and len(done_indices) > 0) or \
                         (not isinstance(done_indices, list) and done_indices.numel() > 0):
-                    self.obs_window[done_indices] = 0.0
-                    self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
+                    self.obs_window[done_indices] = self.obs['obs'][done_indices].unsqueeze(1).repeat(1, W, 1)
 
                 action = self.get_action({'obs': self.obs_window}, is_determenistic=True)
                 obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action)
