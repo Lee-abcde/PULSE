@@ -922,7 +922,7 @@ class AMPAgent(common_agent.CommonAgent):
                     ar1_prior = torch.norm(error, dim=-1).mean()
                     info_dict["kin_ar1"] = ar1_prior
                 # ----------- AR1 连续性约束 for state -----------
-                pred_state = extra_dict['state_before_quant']
+                pred_state = extra_dict['state_after_quant']
                 # reshape to [B, T, state_dim]
                 time_states = pred_state.view(self.minibatch_size // self.horizon_length,
                                               self.horizon_length, -1)
