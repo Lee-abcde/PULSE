@@ -78,7 +78,7 @@ params:
     grad_norm: 50.0
     ppo: True
     e_clip: 0.2
-    horizon_length: 32
+    horizon_length: 64
     minibatch_size: 16384
     mini_epochs: 6
     critic_coef: 5
