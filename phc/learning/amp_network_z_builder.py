@@ -120,7 +120,9 @@ class AMPZBuilder(AMPBuilder):
             y = latent - b
             sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
             sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
-            p = -torch.atan2(sy, sx) / self.tpi
+            if torch.any((f.squeeze(-1) == 0) & (sx == 0)):
+                print("!!! analytical_phase: 发现 f == 0 且 sx == 0. 这会导致 atan2(0, 0) -> nan 梯度 !!!")
+            p = -torch.atan2(sy, sx + 1e-8) / self.tpi
             return p
 
         def pae(self, latent):
