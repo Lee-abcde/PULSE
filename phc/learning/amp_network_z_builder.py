@@ -40,11 +40,11 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
-            self.top_phase = 0.40
-            self.botton_phase = 0.36
-            self.debug_index = 39
-            self.debug_freq = 1.39
-            self.debug_phase_p = torch.full((1, 1), self.botton_phase , device='cuda')
+            self.top_phase = -0.0
+            self.bottom_phase = -0.01
+            self.debug_index = 23
+            self.debug_freq = 1.49
+            self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
 
             self.use_vae_prior = self.task_obs_size_detail.get("use_vae_prior", False)
             self.use_vae_fixed_prior = self.task_obs_size_detail.get("use_vae_fixed_prior", False)
@@ -308,7 +308,7 @@ class AMPZBuilder(AMPBuilder):
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
                         self.debug_phase_p > self.top_phase,
-                        torch.full_like(self.debug_phase_p, self.botton_phase),  # 大于 0.15 时置为 -0.5
+                        torch.full_like(self.debug_phase_p, self.bottom_phase),  # 大于 0.15 时置为 -0.5
                         self.debug_phase_p  # 否则保持原值
                     )
                     p = self.debug_phase_p.clone()  # current phase offset
