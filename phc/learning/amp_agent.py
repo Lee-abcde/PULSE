@@ -363,15 +363,21 @@ class AMPAgent(common_agent.CommonAgent):
             else:
                 res_dict = self.get_action_values({'obs': self.obs_window})
             self.experience_buffer.update_data('obs_window', n, self.obs_window)
-            for k in update_list:
-                self.experience_buffer.update_data(k, n, res_dict[k])
+
+            self.experience_buffer.update_data('actions', n, res_dict['actions'][:,-1,:])
+            self.experience_buffer.update_data('neglogpacs', n, res_dict['neglogpacs'][:,-1])
+            self.experience_buffer.update_data('values', n, res_dict['values'])
+            self.experience_buffer.update_data('mus', n, res_dict['mus'][:,-1,:])
+            self.experience_buffer.update_data('sigmas', n, res_dict['sigmas'][:,-1,:])
+            # for k in update_list:
+            #     self.experience_buffer.update_data(k, n, res_dict[k])
 
             if self.has_central_value:
                 self.experience_buffer.update_data('states', n, self.obs['states'])
             
             if self.only_kin_loss and self.save_kin_info:
-                # pure behavior cloning, kinemaitc loss. 
-                self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
+                # pure behavior cloning, kinemaitc loss.
+                self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'][:,-1,:])
             else:
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
 
@@ -781,6 +787,26 @@ class AMPAgent(common_agent.CommonAgent):
             len_acc += v[1][-1]
         return kin_dict
 
+    def calculate_effective_num(self, obs):
+        # get the first frame of each sample
+        first_frame = obs[:, 0:1, :]  # shape (512, 1, 934)
+
+        # compare every frame with the first one
+        same_mask = (obs == first_frame).all(dim=2)  # (512, 15) -> True where frame == first
+
+        # count how many leading True values from the start
+        def count_leading_trues(row):
+            # row: tensor of shape (15,)
+            diff_idx = (~row).float().argmax().item() if (~row).any() else len(row)
+            return diff_idx
+
+        # vectorized version
+        effective_counts = []
+        for i in range(obs.size(0)):
+            pad_len = count_leading_trues(same_mask[i])
+            effective_counts.append(obs.size(1) - pad_len)
+        effective_counts = torch.tensor(effective_counts)
+        return effective_counts
     def _optimize_kin(self, batch_dict):
         info_dict = {}
         humanoid_env = self.vec_env.env.task
@@ -897,30 +923,41 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_action_loss"] = kin_action_loss
                 info_dict["kin_loss"] = kin_loss
             elif humanoid_env.z_type == "vq_pae":
+                effective_counts = self.calculate_effective_num(batch_dict['obs'])
+                B, T, D = batch_dict['obs'].size(0), batch_dict['obs'].size(1), gt_action.size(1)
+                gt_action_full = torch.zeros(B, T, D, device=gt_action.device)
+
+                for i in range(B):
+                    eff = effective_counts[i].item()
+                    if eff > 0:
+                        gt_action_full[i, -eff:, :] = gt_action[i-eff+1:i+1]
+                        gt_action_full[i, :-eff, :] = gt_action[i-eff:i-eff+1]
+                    else:
+                        gt_action_full[i, :, :] = gt_action[i]
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
-                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()
+                kin_action_loss = torch.norm(pred_action - gt_action_full, dim=-1).mean()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
 
                 # ----------- AR1 连续性约束（可选）-----------
-                ar1_prior = 0
-                if humanoid_env.use_ar1_prior:
-                    time_zs = extra_dict['quantized_z_out'].view(
-                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
-                    )
-                    error = time_zs[:, 1:] - time_zs[:, :-1]
-                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
-                                                          self.horizon_length, -1)
-                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
-                    error = error.view(-1, error.shape[-1])
-                    error[not_consecs] = 0
-                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
-                    error[starteres] = 0
-                    ar1_prior = torch.norm(error, dim=-1).mean()
-                    info_dict["kin_ar1"] = ar1_prior
+                # ar1_prior = 0
+                # if humanoid_env.use_ar1_prior:
+                #     time_zs = extra_dict['quantized_z_out'].view(
+                #         self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                #     )
+                #     error = time_zs[:, 1:] - time_zs[:, :-1]
+                #     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                #                                           self.horizon_length, -1)
+                #     not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                #     error = error.view(-1, error.shape[-1])
+                #     error[not_consecs] = 0
+                #     starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
+                #     error[starteres] = 0
+                #     ar1_prior = torch.norm(error, dim=-1).mean()
+                #     info_dict["kin_ar1"] = ar1_prior
                 # ----------- AR1 连续性约束 for state -----------
                 pred_state = extra_dict['state_after_quant']
                 # reshape to [B, T, state_dim]
@@ -947,7 +984,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + ar1_prior * humanoid_env.ar1_coefficient
+                        # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + regu_prior * 0.005
                 )

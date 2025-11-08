@@ -318,9 +318,9 @@ class AMPZBuilder(AMPBuilder):
                 manifold = y
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
-                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state}
-                return manifold[..., -1], extra_dict
+                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori,
+                              "quantized_z_out": manifold, "state_before_quant": state_ori, "state_after_quant": state}
+                return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
             return task_out_proj, extra_dict
@@ -458,7 +458,7 @@ class AMPZBuilder(AMPBuilder):
             a_out = self.actor_cnn(obs)  # This is empty
             a_out = a_out.contiguous().view(a_out.size(0), -1)
 
-            self_obs = obs[:, -1, :self.self_obs_size]
+            self_obs = obs[:, ..., :self.self_obs_size]
             # task_obs = obs[:, self.self_obs_size:]
             assert (obs.shape[-1] == self.self_obs_size + self.task_obs_size)
             
@@ -557,7 +557,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    actor_input = torch.cat([self_obs, z_out], dim=-1)
+                    actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1)], dim=-1)
 
                 a_out = self.actor_mlp(actor_input)
                 

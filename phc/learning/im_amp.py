@@ -209,7 +209,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
                     self.obs_window[done_indices] = self.obs['obs'][done_indices].unsqueeze(1).repeat(1, W, 1)
 
                 action = self.get_action({'obs': self.obs_window}, is_determenistic=True)
-                obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action)
+                obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action[:,-1,:])
 
                 self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
                 self.obs_window[:, -1, :] = obs_dict
