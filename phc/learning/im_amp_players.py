@@ -262,7 +262,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                     else:
                         action = self.get_action({'obs': self.obs_window}, is_determenistic)
 
-                    obs_dict, r, done, info = self.env_step(self.env, action)
+                    obs_dict, r, done, info = self.env_step(self.env, action[:,-1,:])
 
                     self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
                     self.obs_window[:, -1, :] = obs_dict
