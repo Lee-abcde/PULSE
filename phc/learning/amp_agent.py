@@ -787,26 +787,24 @@ class AMPAgent(common_agent.CommonAgent):
             len_acc += v[1][-1]
         return kin_dict
 
-    def calculate_effective_num(self, obs):
-        # get the first frame of each sample
-        first_frame = obs[:, 0:1, :]  # shape (512, 1, 934)
+    def calculate_effective_mask(self, obs):
+        # obs: (B, T, D)
+        first_frame = obs[:, 0:1, :]  # (B, 1, D)
+        same_mask = (obs == first_frame).all(dim=2)  # (B, T), True = same as first frame
 
-        # compare every frame with the first one
-        same_mask = (obs == first_frame).all(dim=2)  # (512, 15) -> True where frame == first
+        # find first index where obs differs from the first frame
+        diff_index = (~same_mask).float().argmax(dim=1)  # (B,)
+        # handle fully padded rows (no differences)
+        fully_padded = (~same_mask).any(dim=1) == 0
+        diff_index[fully_padded] = obs.size(1)
 
-        # count how many leading True values from the start
-        def count_leading_trues(row):
-            # row: tensor of shape (15,)
-            diff_idx = (~row).float().argmax().item() if (~row).any() else len(row)
-            return diff_idx
+        # now build a mask: 1 for real frames, 0 for padded
+        time_idx = torch.arange(obs.size(1), device=obs.device).unsqueeze(0)  # (1, T)
+        effective_mask = (time_idx >= diff_index.unsqueeze(1)).float()  # (B, T)
 
-        # vectorized version
-        effective_counts = []
-        for i in range(obs.size(0)):
-            pad_len = count_leading_trues(same_mask[i])
-            effective_counts.append(obs.size(1) - pad_len)
-        effective_counts = torch.tensor(effective_counts)
-        return effective_counts
+        rolled_effective_mask = torch.roll(effective_mask, shifts=-1, dims=1)  # shift left
+        rolled_effective_mask[:, -1] = 1.0  # new last column should always be 1 (effective)
+        return rolled_effective_mask
     def _optimize_kin(self, batch_dict):
         info_dict = {}
         humanoid_env = self.vec_env.env.task
@@ -923,20 +921,20 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_action_loss"] = kin_action_loss
                 info_dict["kin_loss"] = kin_loss
             elif humanoid_env.z_type == "vq_pae":
-                effective_counts = self.calculate_effective_num(batch_dict['obs'])
-                B, T, D = batch_dict['obs'].size(0), batch_dict['obs'].size(1), gt_action.size(1)
-                gt_action_full = torch.zeros(B, T, D, device=gt_action.device)
+                with torch.no_grad():
+                    effective_mask = self.calculate_effective_mask(batch_dict['obs'])
+                    B, T = effective_mask.shape
+                    D = gt_action.size(-1)
+                    gt_action_full = torch.zeros(B, T, D, device=gt_action.device)
 
-                for i in range(B):
-                    eff = effective_counts[i].item()
-                    if eff > 0:
-                        gt_action_full[i, -eff:, :] = gt_action[i-eff+1:i+1]
-                        gt_action_full[i, :-eff, :] = gt_action[i-eff:i-eff+1]
-                    else:
-                        gt_action_full[i, :, :] = gt_action[i]
+                    for i in range(B):
+                        # indices of effective frames
+                        eff_len = effective_mask[i].sum().int().item()
+                        gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
-                kin_action_loss = torch.norm(pred_action - gt_action_full, dim=-1).mean()
+                import ipdb; ipdb.set_trace()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * effective_mask.detach()).sum() / effective_mask.sum()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
