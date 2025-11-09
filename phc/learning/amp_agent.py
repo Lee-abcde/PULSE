@@ -933,7 +933,6 @@ class AMPAgent(common_agent.CommonAgent):
                         gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
-                import ipdb; ipdb.set_trace()
                 kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * effective_mask.detach()).sum() / effective_mask.sum()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
