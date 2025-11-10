@@ -934,10 +934,18 @@ class AMPAgent(common_agent.CommonAgent):
                         # indices of effective frames
                         eff_len = effective_mask[i].sum().int().item()
                         gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
+
+                    alpha = 3.0  # 控制指数增长速度，越大越陡
+                    time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
+                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # 减 1 保证最小权重 > 0
+                    time_weights = time_weights / time_weights.max()  # 归一化到 [0,1]
+                    time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
+                    weighted_mask = effective_mask.detach() * time_weights
+
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * effective_mask.detach()).sum() / effective_mask.sum()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
