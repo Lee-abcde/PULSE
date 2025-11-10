@@ -245,14 +245,17 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             done_indices = []
 
             W = self.window_size
-            self.obs_window = obs_dict['obs'].unsqueeze(1).repeat(1, W, 1)
+            obs_dim = obs_dict['obs'].shape[-1]
+            self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
+            self.obs_window[:, -1, :] = obs_dict['obs']
             with torch.no_grad():
                 for n in range(self.max_steps):
                     obs_dict = self.env_reset(done_indices)
 
                     if (isinstance(done_indices, list) and len(done_indices) > 0) or \
                             (not isinstance(done_indices, list) and done_indices.numel() > 0):
-                        self.obs_window[done_indices] = obs_dict['obs'][done_indices].unsqueeze(1).repeat(1, W, 1)
+                        self.obs_window[done_indices] = 0.0
+                        self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
                     if COLLECT_Z: z = self.get_z(obs_dict)
                         
 

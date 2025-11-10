@@ -349,13 +349,16 @@ class AMPAgent(common_agent.CommonAgent):
         reward_raw = torch.zeros(1, device=self.device)
         # 初始化滑动窗口
         W = self.window_size
-        self.obs_window = self.obs['obs'].unsqueeze(1).repeat(1, W, 1)
+        obs_dim = self.obs['obs'].shape[-1]
+        self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
+        self.obs_window[:, -1, :] = self.obs['obs']
         for n in range(self.horizon_length):
 
             self.obs = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
             if len(done_indices) > 0:
-                self.obs_window[done_indices] = self.obs['obs'][done_indices].unsqueeze(1).repeat(1, W, 1)
+                self.obs_window[done_indices] = 0.0
+                self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
@@ -802,9 +805,9 @@ class AMPAgent(common_agent.CommonAgent):
         time_idx = torch.arange(obs.size(1), device=obs.device).unsqueeze(0)  # (1, T)
         effective_mask = (time_idx >= diff_index.unsqueeze(1)).float()  # (B, T)
 
-        rolled_effective_mask = torch.roll(effective_mask, shifts=-1, dims=1)  # shift left
-        rolled_effective_mask[:, -1] = 1.0  # new last column should always be 1 (effective)
-        return rolled_effective_mask
+        # rolled_effective_mask = torch.roll(effective_mask, shifts=-1, dims=1)  # shift left
+        # rolled_effective_mask[:, -1] = 1.0  # new last column should always be 1 (effective)
+        return effective_mask
     def _optimize_kin(self, batch_dict):
         info_dict = {}
         humanoid_env = self.vec_env.env.task
@@ -933,29 +936,29 @@ class AMPAgent(common_agent.CommonAgent):
                         gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
-                kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                # kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * effective_mask.detach()).sum() / effective_mask.sum()
+                # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * effective_mask.detach()).sum() / effective_mask.sum()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
 
                 # ----------- AR1 连续性约束（可选）-----------
-                ar1_prior = 0
-                if humanoid_env.use_ar1_prior:
-                    time_zs = extra_dict['quantized_z_out'].view(
-                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
-                    )
-                    error = time_zs[:, 1:] - time_zs[:, :-1]
-                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
-                                                          self.horizon_length, -1)
-                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
-                    error = error.view(-1, error.shape[-1])
-                    error[not_consecs] = 0
-                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
-                    error[starteres] = 0
-                    ar1_prior = torch.norm(error, dim=-1).mean()
-                    info_dict["kin_ar1"] = ar1_prior
+                # ar1_prior = 0
+                # if humanoid_env.use_ar1_prior:
+                #     time_zs = extra_dict['quantized_z_out'].view(
+                #         self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                #     )
+                #     error = time_zs[:, 1:] - time_zs[:, :-1]
+                #     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
+                #                                           self.horizon_length, -1)
+                #     not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                #     error = error.view(-1, error.shape[-1])
+                #     error[not_consecs] = 0
+                #     starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
+                #     error[starteres] = 0
+                #     ar1_prior = torch.norm(error, dim=-1).mean()
+                #     info_dict["kin_ar1"] = ar1_prior
                 # ----------- AR1 连续性约束 for state -----------
                 pred_state = extra_dict['state_after_quant']
                 # reshape to [B, T, state_dim]
@@ -982,7 +985,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + ar1_prior * humanoid_env.ar1_coefficient
+                        # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + regu_prior * 0.005
                 )
