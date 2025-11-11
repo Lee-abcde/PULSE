@@ -967,17 +967,26 @@ class AMPAgent(common_agent.CommonAgent):
                 #     error[starteres] = 0
                 #     ar1_prior = torch.norm(error, dim=-1).mean()
                 #     info_dict["kin_ar1"] = ar1_prior
-                # ----------- AR1 连续性约束 for state -----------
+                frequency = extra_dict['frequency']
                 pred_state = extra_dict['state_after_quant']
-                # reshape to [B, T, state_dim]
-                time_states = pred_state.view(self.minibatch_size // self.horizon_length,
-                                              self.horizon_length, -1)
-                # difference between consecutive frames
-                state_diff = time_states[:, 1:] - time_states[:, :-1]
                 # optionally, mask out discontinuous episodes
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
                 not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+
+                # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
+                time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
+                                            self.horizon_length, -1)
+                freq_diff = time_freqs[:, 1:] - time_freqs[:, :-1]
+                freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
+                freq_diff[not_consecs] = 0
+                freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
+                info_dict["kin_freq_smooth"] = freq_smooth_loss
+                # ----------- AR1 连续性约束 for state -----------
+                time_states = pred_state.view(self.minibatch_size // self.horizon_length,
+                                              self.horizon_length, -1)
+                # difference between consecutive frames
+                state_diff = time_states[:, 1:] - time_states[:, :-1]
                 state_diff = state_diff.view(-1, state_diff.shape[-1])
                 state_diff[not_consecs] = 0
                 # L2 penalty on difference (encourages temporal smoothness)
@@ -995,6 +1004,7 @@ class AMPAgent(common_agent.CommonAgent):
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
+                        + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.1)
                         + regu_prior * 0.005
                 )
 
