@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 class Quantizer(nn.Module):
     def __init__(self, n_e, e_dim, beta):
@@ -29,7 +32,10 @@ class Quantizer(nn.Module):
         """
         assert z.shape[-1] == self.e_dim
         z_flattened = z.contiguous().view(-1, self.e_dim)
-
+        # records = [
+        #     (240, 0.2923)
+        # ]
+        # self.visualize_vq(records=records)
         # B x V
         d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
             torch.sum(self.embedding.weight**2, dim=1) - 2 * \
@@ -85,6 +91,81 @@ class Quantizer(nn.Module):
         z_q = self.embedding(index_flattened)
         z_q = z_q.view(indices.shape + (self.e_dim, )).contiguous()
         return z_q
+
+    def visualize_vq(self, n_angles=100, device='cpu', method='pca', perplexity=30, records=None):
+        """
+        可视化 quantizer embedding 的相位轨迹。
+        支持 PCA / t-SNE 降维，并可选择高亮记录点。
+
+        Args:
+            n_angles (int): 每个 embedding 轨迹采样角度数
+            device (str): 运行设备 ('cpu' or 'cuda:0')
+            method (str): 'pca' 或 'tsne'
+            perplexity (int): t-SNE 参数
+            records (list[tuple] or None): [(state_idx, phase_value)], 如果提供则高亮这些点
+        """
+        embeddings = self.embedding.weight.data.to(device)  # (n_e, e_dim)
+        n_e, e_dim = embeddings.shape
+
+        # 生成均匀角度 [-pi, pi]
+        angles = torch.linspace(-np.pi, np.pi, n_angles, device=device)
+        angles = angles.unsqueeze(0).repeat(n_e, 1)  # (n_e, n_angles)
+
+        # 圆上采样点
+        y0 = torch.cos(angles)
+        y1 = torch.sin(angles)
+        y = torch.stack((y0, y1), dim=-1)  # (n_e, n_angles, 2)
+
+        # reshape embedding
+        d = e_dim // 2
+        state = embeddings.reshape(n_e, 1, d, 2)  # (n_e, 1, d, 2)
+        y = y.unsqueeze(2)  # (n_e, n_angles, 1, 2)
+        points = torch.matmul(state, y.transpose(-1, -2))  # (n_e, n_angles, d, 1)
+        points = points.squeeze(-1).reshape(n_e, n_angles, -1)  # (n_e, n_angles, d)
+
+        # flatten for dimensionality reduction
+        all_points = points.reshape(n_e * n_angles, -1).cpu().numpy()
+
+        # ----------- 降维部分 -----------
+        if method == 'pca':
+            reducer = PCA(n_components=2)
+            reduced = reducer.fit_transform(all_points)
+            title = "VQ Embeddings Phase Circle (PCA)"
+        elif method == 'tsne':
+            reducer = TSNE(n_components=2, perplexity=perplexity, init='pca', learning_rate='auto')
+            reduced = reducer.fit_transform(all_points)
+            title = f"VQ Embeddings Phase Circle (t-SNE, perplexity={perplexity})"
+        else:
+            raise ValueError("method must be either 'pca' or 'tsne'")
+
+        reduced = reduced.reshape(n_e, n_angles, 2)
+
+        # ----------- 绘图部分 -----------
+        plt.figure(figsize=(7, 7))
+
+        if records is None:
+            # 没有记录 -> 画全部轨迹
+            cmap = plt.cm.get_cmap('hsv', n_e)
+            for i in range(n_e):
+                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.6)
+                plt.scatter(reduced[i, 0, 0], reduced[i, 0, 1], c='k', s=10)  # 起点黑点
+        else:
+            # 有记录 -> 画灰色轨迹 + 红点
+            for i in range(n_e):
+                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.2, color='gray')
+
+            for state_idx, phase_val in records:
+                angle_idx = int(phase_val * (n_angles - 1))
+                x, y_ = reduced[state_idx, angle_idx, :]
+                plt.scatter(x, y_, color='red', s=40)
+
+        plt.axis('equal')
+        plt.grid(True)
+        plt.title(title)
+        plt.show()
+
+        import ipdb;
+        ipdb.set_trace()
 
 
 class EmbeddingEMA(nn.Module):
