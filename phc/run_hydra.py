@@ -311,7 +311,7 @@ def main(cfg_hydra: DictConfig) -> None:
         )
         wandb.config.update(cfg, allow_val_change=True)
         wandb.run.name = cfg.exp_name
-        wandb.run.save()
+        # wandb.run.save()
     
     set_seed(cfg.get("seed", -1), cfg.get("torch_deterministic", False))
 
