@@ -1004,7 +1004,7 @@ class AMPAgent(common_agent.CommonAgent):
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
-                        + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.1)
+                        + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
                         + regu_prior * 0.005
                 )
 
