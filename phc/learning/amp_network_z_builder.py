@@ -100,24 +100,46 @@ class AMPZBuilder(AMPBuilder):
             y = y.reshape(y.shape[0], -1, y.shape[-1])
             return y, signal
 
-        def fft_with_nn(self, func, dim):
-            amp = torch.std(func, dim=dim) * np.sqrt(2)
-            amp = torch.ones_like(amp)
-            offset = torch.mean(func, dim=dim)
+        def fft_with_nn(self, func, dim, mask):
+            """
+            func: (B, C, T) 输入信号
+            mask: (B, 1, T) 有效帧 mask (1=有效, 0=无效)
+            """
+            # -------------------------------
+            # 1. 计算有效帧的均值 (去DC分量)
+            masked_sum = (func * mask).sum(dim=dim)  # (B, C)
+            count = mask.sum(dim=dim).clamp(min=1)  # 避免除0
+            offset = masked_sum / count  # (B, C)
 
-            rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
+            # 去均值并广播
+            func_detrended = func - offset.unsqueeze(-1)
+
+            # -------------------------------
+            # 2. 将无效帧强行置0，避免 FFT 污染
+            func_detrended = func_detrended * mask
+
+            # -------------------------------
+            # 3. FFT 并归一化
+            # 使用有效帧数归一化而非固定 self.time_range
+            rfft = torch.fft.rfft(func_detrended, dim=dim)
             rfft = rfft.abs() ** 2
-            func = rfft
+            rfft = rfft / count.unsqueeze(-1) * 2  # 有效帧归一化
 
-            freq = self.freq_fc(func).squeeze(-1)
+            # -------------------------------
+            # 4. 输入到频率预测网络
+            freq = self.freq_fc(rfft).squeeze(-1)
+
+            # 幅值暂时固定1，也可以根据需要改成有效帧的 std
+            amp = torch.ones_like(offset)
 
             return freq, amp, offset
 
-        def analytical_phase(self, latent, f, b):
+        def analytical_phase(self, latent, f, b, mask):
             b = b.unsqueeze(-1)
             f = f.unsqueeze(-1)
 
-            y = latent - b
+            y = (latent - b) * mask
+
             sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
             sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
             if torch.any((f.squeeze(-1) == 0) & (sx == 0)):
@@ -125,10 +147,10 @@ class AMPZBuilder(AMPBuilder):
             p = -torch.atan2(sy, sx + 1e-8) / self.tpi
             return p
 
-        def pae(self, latent):
+        def pae(self, latent, mask):
             latent1d = self.phase_conv(latent)
-            f, a, b = self.fft_with_nn(latent1d, dim=2)
-            p = self.analytical_phase(latent1d, f, b)
+            f, a, b = self.fft_with_nn(latent1d, dim=2, mask=mask)
+            p = self.analytical_phase(latent1d, f, b, mask=mask)
             return f, a, b, p
 
         def form_embedding(self, task_out_z, obs_dict = None):
@@ -280,10 +302,21 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == "sphere":
                 task_out_proj = project_to_norm(task_out_z, norm=self.embedding_norm, z_type=self.z_type)
             elif self.z_type == "vq_pae":
+                def calculate_effective_mask(obs):
+                    # obs: (B, T, D)
+                    # if padding zero after normalization it will begin like this
+                    invalid_prefix = torch.tensor([-4.1724, 0.2340, -2.2463], device=obs.device)
+                    is_close = torch.isclose(obs[:, :, :3], invalid_prefix, atol=1e-4)
+                    prefix_mask = is_close.all(dim=2)  # (B, T)
+                    effective_mask = (~prefix_mask).float()  # (B, T)
+
+                    return effective_mask
+                mask = calculate_effective_mask(obs_dict['obs']).unsqueeze(1).detach()
+
                 x = task_out_z.transpose(1, 2)  # (B, D, W)
                 latent = self.z_encoder(x)
                 # ---- Phase Prediction ----
-                f, a, b, p = self.pae(latent)
+                f, a, b, p = self.pae(latent, mask)
 
                 state_input = latent.mean(axis=-1)
                 state = self.state_fc(state_input)
