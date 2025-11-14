@@ -792,21 +792,8 @@ class AMPAgent(common_agent.CommonAgent):
 
     def calculate_effective_mask(self, obs):
         # obs: (B, T, D)
-        first_frame = obs[:, 0:1, :]  # (B, 1, D)
-        same_mask = (obs == first_frame).all(dim=2)  # (B, T), True = same as first frame
-
-        # find first index where obs differs from the first frame
-        diff_index = (~same_mask).float().argmax(dim=1)  # (B,)
-        # handle fully padded rows (no differences)
-        fully_padded = (~same_mask).any(dim=1) == 0
-        diff_index[fully_padded] = obs.size(1)
-
-        # now build a mask: 1 for real frames, 0 for padded
-        time_idx = torch.arange(obs.size(1), device=obs.device).unsqueeze(0)  # (1, T)
-        effective_mask = (time_idx >= diff_index.unsqueeze(1)).float()  # (B, T)
-
-        # rolled_effective_mask = torch.roll(effective_mask, shifts=-1, dims=1)  # shift left
-        # rolled_effective_mask[:, -1] = 1.0  # new last column should always be 1 (effective)
+        zero_mask = (obs.abs().sum(dim=2) == 0)  # (B, T)
+        effective_mask = (~zero_mask).float()  # (B, T)
         return effective_mask
     def _optimize_kin(self, batch_dict):
         info_dict = {}
@@ -925,7 +912,7 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_loss"] = kin_loss
             elif humanoid_env.z_type == "vq_pae":
                 with torch.no_grad():
-                    effective_mask = self.calculate_effective_mask(batch_dict['obs'])
+                    effective_mask = self.calculate_effective_mask(batch_dict['obs_orig'])
                     B, T = effective_mask.shape
                     D = gt_action.size(-1)
                     gt_action_full = torch.zeros(B, T, D, device=gt_action.device)
