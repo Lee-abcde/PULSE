@@ -1016,7 +1016,8 @@ class AMPAgent(common_agent.CommonAgent):
                     print(f"vq_loss: {vq_loss}")
                     import ipdb;
                     ipdb.set_trace()  # 在这里停住
-
+                else:
+                    self.model.a2c_network.quantizer.reinitialize()
 
 
 

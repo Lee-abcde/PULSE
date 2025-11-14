@@ -167,6 +167,179 @@ class Quantizer(nn.Module):
         import ipdb;
         ipdb.set_trace()
 
+class VectorQuantizer(nn.Module):
+    def __init__(self, num_embed, embed_dim, beta, distance='l2',
+                 anchor='probrandom', first_batch=False, contras_loss=False, n_dataset=1,
+                 multiple_updater=1):
+        """
+            Taken from https://github.com/lyndonzheng/CVQ-VAE
+            This class implements a feature buffer that stores previously encoded features
+
+            This buffer enables us to initialize the codebook using a history of generated features
+            rather than the ones produced by the latest encoders
+        """
+        super().__init__()
+
+        self.num_embed = num_embed
+        self.embed_dim = embed_dim
+        self.beta = beta
+        self.distance = distance
+        self.first_batch = first_batch
+        self.contras_loss = contras_loss
+        self.decay = 0.99
+        self.init = False
+        self.multiple_updater = multiple_updater
+
+        self.embedding = nn.Embedding(self.num_embed, self.embed_dim)
+        self.embedding.weight.data.uniform_(-1.0 / self.num_embed, 1.0 / self.num_embed)
+        self.usage = np.zeros((n_dataset, self.num_embed), dtype=np.int32)
+        self.calling_from = 0
+        if self.multiple_updater:
+            updater = [self.UpdateModule(self.num_embed, self.decay, anchor) for _ in range(n_dataset)]
+        else:
+            updater = [self.UpdateModule(self.num_embed, self.decay, anchor)] * n_dataset
+        self.updater = nn.ModuleList(updater)
+
+    def get_weight(self):
+        return self.embedding.weight
+
+    class UpdateModule(nn.Module):
+        def __init__(self, num_embed, decay, anchor):
+            super().__init__()
+            self.buffer = {}
+            self.num_embed = num_embed
+            self.decay = decay
+            self.register_buffer("embed_prob", torch.zeros(self.num_embed))
+            self.clear_buffer()
+            self.anchor = anchor
+
+        def clear_buffer(self):
+            self.buffer['encodings'] = []
+            self.buffer['d'] = []
+            self.buffer['z_flattened'] = []
+
+        def update_prob(self, prob):
+            self.embed_prob.mul_(self.decay).add_(prob, alpha=1 - self.decay)
+
+        def get_alpha(self):
+            return torch.exp(-(self.embed_prob * self.num_embed * 10) / (1 - self.decay) - 1e-3).unsqueeze(1)
+
+        def unpack_buffer(self, clear=True):
+            encodings = torch.concat(self.buffer['encodings'], axis=0)
+            d = torch.concat(self.buffer['d'], axis=0)
+            z_flattened = torch.concat(self.buffer['z_flattened'], axis=0)
+            if clear:
+                self.clear_buffer()
+            return encodings, d, z_flattened
+
+        def update_buffer(self, encodings, d, z_flattened):
+            self.buffer['encodings'].append(encodings)
+            self.buffer['d'].append(d)
+            self.buffer['z_flattened'].append(z_flattened)
+
+        def get_update(self, embeddings):
+            encodings, d, z_flattened = self.unpack_buffer(True)
+            avg_probs = torch.mean(encodings, dim=0)
+            self.update_prob(avg_probs)
+            random_feat = self.sample_feat(d, z_flattened)
+            decay = self.get_alpha()
+            update = (1 - decay) * embeddings + decay * random_feat
+            return update
+
+        def sample_feat(self, d, z_flattened):
+            if self.anchor == 'closest':
+                sort_distance, indices = d.sort(dim=0)
+                random_feat = z_flattened.detach()[indices[-1, :]]
+            # feature pool based random sampling
+            elif self.anchor == 'random':
+                random_feat = self.pool.query(z_flattened.detach())
+            # probability based random sampling
+            elif self.anchor == 'probrandom':
+                norm_distance = F.softmax(d.t(), dim=1)
+                prob = torch.multinomial(norm_distance, num_samples=1).view(-1)
+                random_feat = z_flattened.detach()[prob]
+            return random_feat
+
+    def set_caller(self, idx):
+        self.calling_from = idx
+
+    def clear_buffer(self):
+        for updater in self.updater:
+            updater.clear_buffer()
+
+    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+        assert temp is None or temp == 1.0, "Only for interface compatible with Gumbel"
+        assert rescale_logits == False, "Only for interface compatible with Gumbel"
+        assert return_logits == False, "Only for interface compatible with Gumbel"
+        # reshape z -> (batch, height, width, channel) and flatten
+        # z = rearrange(z, 'b c h w -> b h w c').contiguous()
+        z_shape = z.shape
+        z_flattened = z.view(-1, self.embed_dim)
+
+        # clculate the distance
+        if self.distance == 'l2':
+            # l2 distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+            d = - torch.sum(z_flattened.detach() ** 2, dim=1, keepdim=True) - \
+                torch.sum(self.embedding.weight ** 2, dim=1) + \
+                2 * torch.matmul(z_flattened.detach(), self.embedding.weight.t())
+        elif self.distance == 'cos':
+            # cosine distances from z to embeddings e_j
+            normed_z_flattened = F.normalize(z_flattened, dim=1).detach()
+            normed_codebook = F.normalize(self.embedding.weight, dim=1)
+            d = torch.matmul(normed_z_flattened, normed_codebook.t())
+
+        # encoding
+        sort_distance, indices = d.sort(dim=1)
+        # look up the closest point for the indices
+        encoding_indices = indices[:, -1]
+
+        # quantise and unflatten
+        z_q = self.embedding.weight[encoding_indices]
+        # reshape back to match original input shape
+        z_q = z_q.reshape(z_shape)
+
+        if self.training:
+            # compute loss for embedding
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + torch.mean((z_q - z.detach()) ** 2)
+            # preserve gradients
+            z_q = z + (z_q - z).detach()
+
+            encodings = torch.zeros(encoding_indices.unsqueeze(1).shape[0], self.num_embed, device=z.device)
+            encodings.scatter_(1, encoding_indices.unsqueeze(1), 1)
+            # avg_probs = torch.mean(encodings, dim=0)
+            # perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
+            # min_encodings = encodings
+        else:
+            loss = torch.tensor(0., device=z.device)
+            # perplexity = torch.zeros(1, device=z.device)
+            # min_encodings = torch.zeros(1, device=z.device)
+
+        # update the running usage
+        if self.training and self.calling_from >= 0:
+            np.add.at(self.usage[self.calling_from], encoding_indices.detach().cpu().numpy(), 1)
+            self.updater[self.calling_from].update_buffer(encodings, d, z_flattened)
+
+        # contrastive loss
+        if self.training and self.contras_loss:
+            sort_distance, indices = d.sort(dim=0)
+            dis_pos = sort_distance[-max(1, int(sort_distance.size(0) / self.num_embed)):, :].mean(dim=0,
+                                                                                                   keepdim=True)
+            dis_neg = sort_distance[:int(sort_distance.size(0) * 1 / 2), :]
+            dis = torch.cat([dis_pos, dis_neg], dim=0).t() / 0.07
+            contra_loss = F.cross_entropy(dis, torch.zeros((dis.size(0),), dtype=torch.long, device=dis.device))
+            loss = loss + contra_loss
+
+        return loss, z_q, encoding_indices
+
+    def reinitialize(self):
+        # online clustered reinitialisation for unoptimized points
+        if self.training:
+            if self.multiple_updater:
+                updates = [self.updater[i].get_update(self.embedding.weight) for i in range(len(self.updater))]
+                self.embedding.weight.data = torch.stack(updates, dim=0).mean(dim=0)
+            else:
+                updater = self.updater[0]
+                self.embedding.weight.data = updater.get_update(self.embedding.weight)
 
 class EmbeddingEMA(nn.Module):
     def __init__(self, num_tokens, codebook_dim, decay=0.99, eps=1e-5):

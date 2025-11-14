@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from phc.utils.torch_utils import project_to_norm
-from phc.learning.vq_quantizer import EMAVectorQuantizer, Quantizer
+from phc.learning.vq_quantizer import EMAVectorQuantizer, Quantizer, VectorQuantizer
 from phc.utils.flags import flags
 from learning.vq_pae_modules import *
 from functools import partial
@@ -707,7 +707,7 @@ class AMPZBuilder(AMPBuilder):
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
 
                 # ---- 5. Vector Quantizer ----
-                self.quantizer = Quantizer(self.dict_size, self.num_embed, 0.25)
+                self.quantizer = VectorQuantizer(self.dict_size, self.num_embed, 0.25)
 
                 # self.deconvs = []
                 # decoder_channels = encoder_channels[::-1]
