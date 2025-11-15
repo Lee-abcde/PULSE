@@ -929,10 +929,20 @@ class AMPAgent(common_agent.CommonAgent):
                     time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
                     weighted_mask = effective_mask.detach() * time_weights
 
+                    valid_len = effective_mask.sum(dim=1)  # (B,)
+                    T_total = effective_mask.shape[1]
+                    r = valid_len / T_total  # 比例 0~1
+
+                    beta = 4.0
+                    soft_w = torch.exp(beta * (r - 1.0))
+                    soft_w = soft_w.clamp(min=1e-4, max=1.0)
+                    soft_w = soft_w.view(B, 1)  # (B,1)
+                    final_mask = weighted_mask * soft_w
+
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
 
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
@@ -955,6 +965,10 @@ class AMPAgent(common_agent.CommonAgent):
                 #     ar1_prior = torch.norm(error, dim=-1).mean()
                 #     info_dict["kin_ar1"] = ar1_prior
                 frequency = extra_dict['frequency']
+                freq_min = 0.5
+                freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
+                info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
+
                 pred_state = extra_dict['state_after_quant']
                 # optionally, mask out discontinuous episodes
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
@@ -992,6 +1006,7 @@ class AMPAgent(common_agent.CommonAgent):
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
+                        + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
                 )
 
