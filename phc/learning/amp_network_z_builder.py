@@ -663,7 +663,7 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == 'vq_pae':
                 self.n_input_channels = self_obs_size + task_obs_size
                 self.n_latent_channels = self.embedding_size
-                self.window = getattr(self, 'window', 0.5)
+                self.window = getattr(self, 'window', 0.23)
                 self.time_range = self.window_size
                 self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
 
