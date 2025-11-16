@@ -965,7 +965,7 @@ class AMPAgent(common_agent.CommonAgent):
                 #     ar1_prior = torch.norm(error, dim=-1).mean()
                 #     info_dict["kin_ar1"] = ar1_prior
                 frequency = extra_dict['frequency']
-                freq_min = 0.5
+                freq_min = 1.5
                 freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
                 info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
 
