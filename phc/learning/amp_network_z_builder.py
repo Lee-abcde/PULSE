@@ -557,7 +557,7 @@ class AMPZBuilder(AMPBuilder):
                 #     import ipdb; ipdb.set_trace()
                 #     import joblib;joblib.dump(self.z_acc, "z_acc_compare_3.pkl")
                 if self.z_all:
-                    actor_input = z_out
+                    actor_input = z_out.permute(0, 2, 1)
                 else:
                     actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1)], dim=-1)
 
