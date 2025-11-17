@@ -298,6 +298,14 @@ class AMPZBuilder(AMPBuilder):
                     # self.debug_index += 1
                 # print(indexes, f, p)
                 if flags.debug:
+                    if flags.freq_inc:
+                        self.debug_freq += 0.05
+                        flags.freq_inc = not flags.freq_inc
+                        print("current debug frequency", self.debug_freq)
+                    elif flags.freq_dec:
+                        self.debug_freq -= 0.05
+                        flags.freq_dec = not flags.freq_dec
+                        print("current debug frequency", self.debug_freq)
                     B = state.shape[0]
                       # 默认为 0
                     print(self.debug_index, f, p)

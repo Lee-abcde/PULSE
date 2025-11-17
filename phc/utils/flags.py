@@ -10,4 +10,6 @@ flags = Flags({
     'debug': False,
     "real_traj": False,
     "im_eval": False,
+    "freq_inc": False,
+    "freq_dec": False,
     })
