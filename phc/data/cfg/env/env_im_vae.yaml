@@ -110,3 +110,5 @@ plane:
   staticFriction: 1.0
   dynamicFriction: 1.0
   restitution: 0.0
+
+z_all: False
