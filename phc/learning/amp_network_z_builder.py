@@ -296,7 +296,7 @@ class AMPZBuilder(AMPBuilder):
                     flags.trigger_input = False
                     flags.debug = not flags.debug
                     # self.debug_index += 1
-                # print(indexes, f, p)
+
                 if flags.debug:
                     if flags.freq_inc:
                         self.debug_freq += 0.05
@@ -306,9 +306,26 @@ class AMPZBuilder(AMPBuilder):
                         self.debug_freq -= 0.05
                         flags.freq_dec = not flags.freq_dec
                         print("current debug frequency", self.debug_freq)
+
+                    if flags.P_upper_inc:
+                        self.top_phase += 0.05
+                        flags.P_upper_inc = not flags.P_upper_inc
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    elif flags.P_upper_dec:
+                        self.top_phase -= 0.05
+                        flags.P_upper_dec = not flags.P_upper_dec
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    if flags.P_lower_inc:
+                        self.bottom_phase += 0.05
+                        flags.P_lower_inc = not flags.P_lower_inc
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    elif flags.P_lower_dec:
+                        self.bottom_phase -= 0.05
+                        flags.P_lower_dec = not flags.P_lower_dec
+                        print("current phase range:", self.bottom_phase, self.top_phase)
                     B = state.shape[0]
                       # 默认为 0
-                    print(self.debug_index, f, p)
+                    # print(self.debug_index, f, p)
                     # 为 batch 中的每个样本强制使用这个索引
                     debug_indices = torch.full((B,), fill_value=self.debug_index,
                                                dtype=torch.long, device=state.device)

@@ -12,4 +12,10 @@ flags = Flags({
     "im_eval": False,
     "freq_inc": False,
     "freq_dec": False,
-    })
+
+    # New flags
+    "P_lower_dec": False,
+    "P_lower_inc": False,
+    "P_upper_dec": False,
+    "P_upper_inc": False,
+})
