@@ -284,8 +284,10 @@ class AMPZBuilder(AMPBuilder):
                 latent = self.z_encoder(x)
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
-
-                state_input = latent.mean(axis=-1)
+                # state_input = latent.mean(axis=-1)
+                latent_transposed = latent.transpose(1, 2)  # (B, W, D)
+                state_input = torch.bmm(latent, latent_transposed).view(latent.shape[0], -1)
+                state_input = self.bn(state_input)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -728,7 +730,8 @@ class AMPZBuilder(AMPBuilder):
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
                 # Output is shape [B, pae_state_dim] (which is self.embedding_size)
                  # define how many FC layers (configurable)
-                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
+                self.bn = nn.BatchNorm1d(self.n_latent_channels * self.n_latent_channels)
+                n_channels_state_mlp = [self.n_latent_channels * self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
 
                 # ---- 5. Vector Quantizer ----
