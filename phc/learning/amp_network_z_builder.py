@@ -87,22 +87,31 @@ class AMPZBuilder(AMPBuilder):
 
         def get_phase_manifold(self, state, angles):
             """
-            :param state: (batch_size, n_channel_latent)
-            :param angles: (batch_size, n_channel_phase, time_range)
-            :return:
+            state: Quantized state, shape (B, Channels * 3)
+                   (假设你调整了维度，或者 reshape 逻辑)
             """
-            state = state.reshape((state.shape[0], angles.shape[1], -1, 2))
+            # 1. Reshape: 最后一维变成 3
+            # [0]: Cosine Weight (控制一部分振幅)
+            # [1]: Sine Weight (控制另一部分振幅)
+            # [2]: DC Offset (控制中心位置)
+            state = state.reshape((state.shape[0], angles.shape[1], -1, 3))
+
+            ac_weights = state[..., :2]  # (B, C, 1, 2) -> 这里的模长就是 Amplitude
+            dc_bias = state[..., 2:]  # (B, C, 1, 1) -> 这里就是 Offset
+
             y0 = torch.cos(angles)
             y1 = torch.sin(angles)
-            y = torch.stack((y0, y1), dim=-2)
-            signal = y
-            y = state @ y
-            y = y.reshape(y.shape[0], -1, y.shape[-1])
-            return y, signal
+            y_wave = torch.stack((y0, y1), dim=-2)  # (B, C, 2, T)
+
+            signal_ac = ac_weights @ y_wave
+
+            reconstructed = signal_ac + dc_bias
+            reconstructed = reconstructed.reshape(reconstructed.shape[0], -1, reconstructed.shape[-1])
+            return reconstructed, y_wave
 
         def fft_with_nn(self, func, dim):
             amp = torch.std(func, dim=dim) * np.sqrt(2)
-            # amp = torch.ones_like(amp)
+            amp = torch.ones_like(amp)
             offset = torch.mean(func, dim=dim)
 
             rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
@@ -285,9 +294,11 @@ class AMPZBuilder(AMPBuilder):
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
                 state_input = latent.mean(axis=-1)
+                amp_input = torch.std(latent, dim=-1) * np.sqrt(2)
                 # latent_transposed = latent.transpose(1, 2)  # (B, W, D)
                 # state_input = torch.bmm(latent, latent_transposed).view(latent.shape[0], -1)
                 # state_input = self.bn(state_input)
+                state_input = torch.cat([amp_input, state_input], dim=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -701,7 +712,7 @@ class AMPZBuilder(AMPBuilder):
                 self.pae_n_layers_fft = getattr(self, 'pae_n_layers_fft', 7)
                 n_layers_state = getattr(self, 'pae_n_layers_state', 5)
 
-                self.num_embed = 2 * self.n_latent_channels
+                self.num_embed = 3 * self.n_latent_channels
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(
@@ -731,7 +742,7 @@ class AMPZBuilder(AMPBuilder):
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
                 # Output is shape [B, pae_state_dim] (which is self.embedding_size)
                  # define how many FC layers (configurable)
-                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
+                n_channels_state_mlp = [self.n_latent_channels * 2] + [self.num_embed] * n_layers_state
                 # self.bn = nn.BatchNorm1d(self.n_latent_channels * self.n_latent_channels)
                 # n_channels_state_mlp = [self.n_latent_channels * self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
