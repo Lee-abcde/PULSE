@@ -102,7 +102,7 @@ class AMPZBuilder(AMPBuilder):
 
         def fft_with_nn(self, func, dim):
             amp = torch.std(func, dim=dim) * np.sqrt(2)
-            amp = torch.ones_like(amp)
+            # amp = torch.ones_like(amp)
             offset = torch.mean(func, dim=dim)
 
             rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
@@ -293,7 +293,8 @@ class AMPZBuilder(AMPBuilder):
 
 
                 loss, state, indexes = self.quantizer(state)
-                # print(indexes, f, p)
+                # if not flags.debug:
+                #     print(indexes, f, p)
                 if flags.trigger_input:
                     flags.trigger_input = False
                     flags.debug = not flags.debug
