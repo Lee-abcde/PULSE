@@ -936,8 +936,16 @@ class AMPAgent(common_agent.CommonAgent):
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- 动作重建损失 -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * final_mask.detach()).sum() / final_mask.sum()
 
+                # =========== 新增: 观测重构损失 (Reconstruction Loss) ===========
+                recon_obs = extra_dict['recon_obs'].permute(0, 2, 1)
+                target_obs = batch_dict['obs_orig']  # (B, T, C)
+
+                recon_diff = recon_obs - target_obs
+                recon_error = recon_diff.norm(dim=-1)
+                kin_recon_loss = (recon_error * final_mask.detach()).sum() / final_mask.sum()
+                info_dict["kin_recon_loss"] = kin_recon_loss
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
@@ -997,6 +1005,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + kin_recon_loss * getattr(humanoid_env, "recon_coeff", 1.0)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
