@@ -940,7 +940,7 @@ class AMPAgent(common_agent.CommonAgent):
 
                 # =========== 新增: 观测重构损失 (Reconstruction Loss) ===========
                 recon_obs = extra_dict['recon_obs'].permute(0, 2, 1)
-                target_obs = batch_dict['obs_orig']  # (B, T, C)
+                target_obs = batch_dict['obs']  # (B, T, C)
 
                 recon_diff = recon_obs - target_obs
                 recon_error = recon_diff.norm(dim=-1)
