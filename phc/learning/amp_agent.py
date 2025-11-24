@@ -941,6 +941,11 @@ class AMPAgent(common_agent.CommonAgent):
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
 
+                # prior loss
+                prior_mu = self.model.a2c_network.compute_vqpae_prior(batch_dict, extra_dict['state_after_quant'])
+                vq_mu = extra_dict['quantized_z_out']
+                prior_mse_loss = torch.norm(prior_mu - vq_mu, dim=-1).mean()
+                info_dict["kin_prior_mse_loss"] = prior_mse_loss
                 # ----------- AR1 连续性约束（可选）-----------
                 # ar1_prior = 0
                 # if humanoid_env.use_ar1_prior:
@@ -996,6 +1001,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + prior_mse_loss * getattr(humanoid_env, "prior_coeff", 0.01)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)

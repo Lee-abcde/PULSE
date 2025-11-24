@@ -392,7 +392,19 @@ class AMPZBuilder(AMPBuilder):
             prior_latent = self.z_prior(self_obs)
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
-           
+
+        def compute_vqpae_prior(self, obs_dict, state_after_quant):
+            self_obs = obs_dict['obs'][:, -1, :self.self_obs_size]
+            self_obs = torch.cat([self_obs, state_after_quant], dim=-1)
+
+            prior_latent = self.z_prior(self_obs)
+            raw_phase = self.z_prior_mu(prior_latent)
+            phase = raw_phase / (raw_phase.norm(dim=-1, keepdim=True) + 1e-8)  # (B,2)
+
+            prior_phase = phase.unsqueeze(-1)
+            state = state_after_quant.reshape((state_after_quant.shape[0], -1, 2))
+            prior_mu = state @ prior_phase
+            return prior_mu.squeeze(dim=-1)
         
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
@@ -701,6 +713,12 @@ class AMPZBuilder(AMPBuilder):
                 init_mlp(self.z_prior_mu, mlp_init)
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
+                # prior
+                mlp_args = {'input_size': self_obs_size + 2 * self.embedding_size, 'units': self._task_units, 'activation': self._task_activation,
+                            'dense_func': torch.nn.Linear}
+                self.z_prior = self._build_mlp(**mlp_args)
+                self.z_prior_mu = nn.Linear(in_features=self._task_units[-1], out_features=2)
+                # VQPAE
                 self.n_input_channels = self_obs_size + task_obs_size
                 self.n_latent_channels = self.embedding_size
                 self.window = getattr(self, 'window', 0.23)
