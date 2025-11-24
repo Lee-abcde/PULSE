@@ -40,9 +40,9 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
-            self.top_phase = -0.0
-            self.bottom_phase = -0.01
-            self.debug_index = 23
+            self.top_phase = 1.0
+            self.bottom_phase = 0.
+            self.debug_index = 33
             self.debug_freq = 1.49
             self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
 
@@ -312,6 +312,15 @@ class AMPZBuilder(AMPBuilder):
                         self.debug_freq -= 0.05
                         flags.freq_dec = not flags.freq_dec
                         print("current debug frequency", self.debug_freq)
+
+                    if flags.Index_dec:
+                        self.debug_index -= 1
+                        flags.Index_dec = not flags.Index_dec
+                        print("current debug index", self.debug_index)
+                    elif flags.Index_inc:
+                        self.debug_index += 1
+                        flags.Index_inc = not flags.Index_inc
+                        print("current debug index", self.debug_index)
 
                     if flags.P_upper_inc:
                         self.top_phase += 0.05

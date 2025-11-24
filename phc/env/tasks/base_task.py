@@ -168,6 +168,9 @@ class BaseTask():
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "P_upper_down")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_4, "P_upper_up")
 
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_5, "Index_down")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_6, "Index_up")
+
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_SPACE, "PAUSE")
 
             # set the camera position based on up axis
@@ -433,6 +436,14 @@ class BaseTask():
                 elif evt.action == "P_upper_up" and evt.value > 0:
                     flags.P_upper_inc = not flags.P_upper_inc
                     print("P upper bound increase:", flags.P_upper_inc)
+
+                elif evt.action == "Index_down" and evt.value > 0:
+                    flags.Index_dec = not flags.Index_dec
+                    print("Index decrease:", flags.Index_dec)
+
+                elif evt.action == "Index_up" and evt.value > 0:
+                    flags.Index_inc = not flags.Index_inc
+                    print("Index increase:", flags.Index_inc)
             
             if self.recording_state_change:
                 if not self.recording:

@@ -18,4 +18,6 @@ flags = Flags({
     "P_lower_inc": False,
     "P_upper_dec": False,
     "P_upper_inc": False,
+    "Index_dec": False,
+    "Index_inc": False,
 })
