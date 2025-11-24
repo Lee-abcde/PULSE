@@ -351,13 +351,8 @@ class AMPZBuilder(AMPBuilder):
                 manifold = y
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
-                if self.training:
-                    y = self.deconvs(y)
-                    extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state, "frequency": f, 'recon_obs': y}
-                else:
-                    extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state, "frequency": f}
+                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
+                          "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state, "frequency": f}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -747,15 +742,15 @@ class AMPZBuilder(AMPBuilder):
                 # ---- 5. Vector Quantizer ----
                 self.quantizer = VectorQuantizer(self.dict_size, self.num_embed, 0.25)
 
-                self.deconvs = []
-                decoder_channels = encoder_channels[::-1]
-                for i in range(self.pae_n_layers):
-                    self.deconvs.append(nn.Conv1d(decoder_channels[i], decoder_channels[i + 1],
-                                                  self.pae_kernel_size, padding='same'))
-                    if i != self.pae_n_layers - 1:
-                        self.deconvs.append(normalizer(self.window_size))  # Use window_size
-                        self.deconvs.append(nn.ELU())
-                self.deconvs = nn.Sequential(*self.deconvs)
+                # self.deconvs = []
+                # decoder_channels = encoder_channels[::-1]
+                # for i in range(self.pae_n_layers):
+                #     self.deconvs.append(nn.Conv1d(decoder_channels[i], decoder_channels[i + 1],
+                #                                   self.pae_kernel_size, padding='same'))
+                #     if i != self.pae_n_layers - 1:
+                #         self.deconvs.append(normalizer(self.window_size))  # Use window_size
+                #         self.deconvs.append(nn.ELU())
+                # self.deconvs = nn.Sequential(*self.deconvs)
 
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
