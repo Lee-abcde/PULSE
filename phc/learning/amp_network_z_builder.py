@@ -345,7 +345,9 @@ class AMPZBuilder(AMPBuilder):
                     debug_indices = torch.full((B,), fill_value=self.debug_index,
                                                dtype=torch.long, device=state.device)
                     state = self.quantizer.embedding(debug_indices)
-
+                    # prior_mu = self.compute_vqpae_prior(obs_dict, state)
+                    # prior_mu_3d = prior_mu.unsqueeze(-1).expand(-1, -1, 7)
+                    # return prior_mu_3d, None
                     f = torch.tensor([[self.debug_freq]], device=state.device)  # fixed frequency
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(

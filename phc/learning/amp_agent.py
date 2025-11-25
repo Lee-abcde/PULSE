@@ -942,9 +942,9 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_vq_loss"] = vq_loss
 
                 # prior loss
-                prior_mu = self.model.a2c_network.compute_vqpae_prior(batch_dict, extra_dict['state_after_quant'])
+                prior_mu = self.model.a2c_network.compute_vqpae_prior(batch_dict, extra_dict['state_after_quant'].detach())
                 vq_mu = extra_dict['quantized_z_out']
-                prior_mse_loss = torch.norm(prior_mu - vq_mu, dim=-1).mean()
+                prior_mse_loss = torch.norm(prior_mu - vq_mu.detach(), dim=-1).mean()
                 info_dict["kin_prior_mse_loss"] = prior_mse_loss
                 # ----------- AR1 连续性约束（可选）-----------
                 # ar1_prior = 0
