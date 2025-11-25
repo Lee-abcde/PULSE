@@ -352,6 +352,7 @@ class BaseTask():
                     self._clear_recorded_states()
                 elif evt.action == "reset" and evt.value > 0:
                     self.reset()
+                    flags.reset = not flags.reset
                 elif evt.action == "follow" and evt.value > 0:
                     flags.follow = not flags.follow
                 elif evt.action == "fixed" and evt.value > 0:

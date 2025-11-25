@@ -304,6 +304,10 @@ class AMPZBuilder(AMPBuilder):
                     # self.debug_index += 1
 
                 if flags.debug:
+                    if flags.reset:
+                        self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
+                        flags.reset = not flags.reset
+                        print("Reset Start Phase")
                     if flags.freq_inc:
                         self.debug_freq += 0.05
                         flags.freq_inc = not flags.freq_inc
