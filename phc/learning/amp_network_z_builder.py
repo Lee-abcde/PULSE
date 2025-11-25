@@ -286,11 +286,11 @@ class AMPZBuilder(AMPBuilder):
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
                 state_input = latent.mean(axis=-1)
-                amp_input = torch.std(latent, dim=-1) * np.sqrt(2)
+                # amp_input = torch.std(latent, dim=-1) * np.sqrt(2)
                 # latent_transposed = latent.transpose(1, 2)  # (B, W, D)
                 # state_input = torch.bmm(latent, latent_transposed).view(latent.shape[0], -1)
                 # state_input = self.bn(state_input)
-                state_input = torch.cat([amp_input, state_input], dim=-1)
+                # state_input = torch.cat([amp_input, state_input], dim=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -763,7 +763,7 @@ class AMPZBuilder(AMPBuilder):
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
                 # Output is shape [B, pae_state_dim] (which is self.embedding_size)
                  # define how many FC layers (configurable)
-                n_channels_state_mlp = [self.n_latent_channels * 2] + [self.num_embed] * n_layers_state
+                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
                 # self.bn = nn.BatchNorm1d(self.n_latent_channels * self.n_latent_channels)
                 # n_channels_state_mlp = [self.n_latent_channels * self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
