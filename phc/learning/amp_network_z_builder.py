@@ -367,7 +367,8 @@ class AMPZBuilder(AMPBuilder):
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                          "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state, "frequency": f}
+                          "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state,
+                          "frequency": f, "full_quantized_z_out": manifold}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -399,18 +400,20 @@ class AMPZBuilder(AMPBuilder):
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
 
-        def compute_vqpae_prior(self, obs_dict, state_after_quant):
-            self_obs = obs_dict['obs'][:, -1, :self.self_obs_size]
-            self_obs = torch.cat([self_obs, state_after_quant], dim=-1)
+        def compute_vqpae_prior(self, obs_dict, state_after_quant, frequency):
+            self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
+            state_concat = state_after_quant.unsqueeze(1).expand(-1, self_obs.shape[1], -1)
+            self_obs = torch.cat([self_obs, state_concat], dim=-1)
 
-            prior_latent = self.z_prior(self_obs)
-            raw_phase = self.z_prior_mu(prior_latent)
-            phase = raw_phase / (raw_phase.norm(dim=-1, keepdim=True) + 1e-8)  # (B,2)
+            prior_latent = self.prior_z_encoder(self_obs.transpose(1,2))
+            prior_latent1d = self.prior_phase_conv(prior_latent) # B, 1, W
+            offset = torch.mean(prior_latent1d, dim=2)
+            p = self.analytical_phase(prior_latent1d, frequency, offset)
 
-            prior_phase = phase.unsqueeze(-1)
-            state = state_after_quant.reshape((state_after_quant.shape[0], -1, 2))
-            prior_mu = state @ prior_phase
-            return prior_mu.squeeze(dim=-1)
+            angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
+
+            prior_manifold, _ = self.get_phase_manifold(state_after_quant, angles)
+            return prior_manifold
         
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
@@ -719,11 +722,6 @@ class AMPZBuilder(AMPBuilder):
                 init_mlp(self.z_prior_mu, mlp_init)
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
-                # prior
-                mlp_args = {'input_size': self_obs_size + 2 * self.embedding_size, 'units': self._task_units, 'activation': self._task_activation,
-                            'dense_func': torch.nn.Linear}
-                self.z_prior = self._build_mlp(**mlp_args)
-                self.z_prior_mu = nn.Linear(in_features=self._task_units[-1], out_features=2)
                 # VQPAE
                 self.n_input_channels = self_obs_size + task_obs_size
                 self.n_latent_channels = self.embedding_size
@@ -784,6 +782,18 @@ class AMPZBuilder(AMPBuilder):
                 #         self.deconvs.append(normalizer(self.window_size))  # Use window_size
                 #         self.deconvs.append(nn.ELU())
                 # self.deconvs = nn.Sequential(*self.deconvs)
+
+                # prior
+                self.prior_input_channels = self_obs_size + self.num_embed
+                prior_encoder_channels = [self.prior_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
+                self.prior_z_encoder = []
+                for i in range(self.pae_n_layers):
+                    self.prior_z_encoder.append(nn.Conv1d(prior_encoder_channels[i], prior_encoder_channels[i + 1],
+                                                    self.pae_kernel_size, padding='same'))
+                    self.prior_z_encoder.append(normalizer(self.time_range)) # Requires normalizer
+                    self.prior_z_encoder.append(nn.ELU())
+                self.prior_z_encoder = nn.Sequential(*self.prior_z_encoder)
+                self.prior_phase_conv = nn.Sequential(nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
