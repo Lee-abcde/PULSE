@@ -90,14 +90,19 @@ class AMPZBuilder(AMPBuilder):
             :param angles: (batch_size, n_channel_phase, time_range)
             :return:
             """
-            state = state.reshape((state.shape[0], angles.shape[1], -1, 2))
+            state = state.reshape((state.shape[0], angles.shape[1], -1, 3))
+
+            ac_weights = state[..., :2]  # (B, C, 1, 2) -> 这里的模长就是 Amplitude
+            dc_bias = state[..., 2:]
             y0 = torch.cos(angles)
             y1 = torch.sin(angles)
-            y = torch.stack((y0, y1), dim=-2)
-            signal = y
-            y = state @ y
-            y = y.reshape(y.shape[0], -1, y.shape[-1])
-            return y, signal
+            y_wave = torch.stack((y0, y1), dim=-2)  # (B, C, 2, T)
+
+            signal_ac = ac_weights @ y_wave
+
+            reconstructed = signal_ac + dc_bias
+            reconstructed = reconstructed.reshape(reconstructed.shape[0], -1, reconstructed.shape[-1])
+            return reconstructed, y_wave
 
         def fft_with_nn(self, func, dim):
             amp = torch.std(func, dim=dim) * np.sqrt(2)
@@ -318,7 +323,8 @@ class AMPZBuilder(AMPBuilder):
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state}
+                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state,
+                              "last_quantized_z_out": manifold[..., -2]}
                 return manifold[..., -1], extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -670,7 +676,7 @@ class AMPZBuilder(AMPBuilder):
                 self.pae_n_layers_fft = getattr(self, 'pae_n_layers_fft', 7)
                 n_layers_state = getattr(self, 'pae_n_layers_state', 5)
 
-                self.num_embed = 2 * self.n_latent_channels
+                self.num_embed = 3 * self.n_latent_channels
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(

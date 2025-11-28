@@ -13,6 +13,9 @@ class Quantizer(nn.Module):
 
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        with torch.no_grad():
+            self.embedding.weight[:, 0::3].zero_()
+            self.embedding.weight[:, 1::3].zero_()
         # self.embedding.weight.data.uniform_(-1.0 / 2, 1.0 / 2)
         # self.embedding.weight.data.uniform_(-1.0 / 256, 1.0 / 256)
         # self.embedding.weight.data = self.embedding.weight.data/self.embedding.weight.data.norm(dim = -1, keepdim=True)  # project to sphere
@@ -85,6 +88,83 @@ class Quantizer(nn.Module):
         z_q = self.embedding(index_flattened)
         z_q = z_q.view(indices.shape + (self.e_dim, )).contiguous()
         return z_q
+
+    def visualize_vq(self, n_angles=100, device='cpu', method='pca', perplexity=30, records=None):
+        """
+        可视化包含 DC offset 的 VQ embedding 相位轨迹
+        与 get_phase_manifold 完全一致
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import torch
+        from sklearn.decomposition import PCA
+        from sklearn.manifold import TSNE
+
+        with torch.no_grad():
+            embeddings = self.embedding.weight.to(device)  # (n_e, e_dim)
+
+        n_e, e_dim = embeddings.shape
+        d = e_dim // 3  # ✅ 每 3 维一组：[A, B, offset]
+
+        # ===== 1. 构造角度 θ =====
+        angles = torch.linspace(-np.pi, np.pi, n_angles, device=device)
+        angles = angles.unsqueeze(0).unsqueeze(0)  # (1, 1, T)
+        angles = angles.repeat(n_e, d, 1)  # (n_e, d, T)
+
+        # ===== 2. reshape embedding 为 (n_e, d, 1, 3) =====
+        state = embeddings.view(n_e, d, 3).unsqueeze(2)
+
+        ac_weights = state[..., :2]  # (n_e, d, 1, 2)
+        dc_bias = state[..., 2:]  # (n_e, d, 1, 1)
+
+        # ===== 3. 生成 cos / sin =====
+        y0 = torch.cos(angles)
+        y1 = torch.sin(angles)
+        y_wave = torch.stack((y0, y1), dim=-2)  # (n_e, d, 2, T)
+
+        # ===== 4. 生成轨迹（与你 forward 完全一致）=====
+        signal_ac = ac_weights @ y_wave  # (n_e, d, 1, T)
+        reconstructed = signal_ac + dc_bias  # (n_e, d, 1, T)
+
+        points = reconstructed.squeeze(2)  # (n_e, d, T)
+        points = points.permute(0, 2, 1)  # (n_e, T, d)
+        all_points = points.reshape(n_e * n_angles, d).detach().cpu().numpy()
+
+        # ===== 5. 降维 =====
+        if method == 'pca':
+            reducer = PCA(n_components=2)
+            reduced = reducer.fit_transform(all_points)
+            title = "VQ Phase Manifold with Offset (PCA)"
+        elif method == 'tsne':
+            reducer = TSNE(n_components=2, perplexity=perplexity, init='pca', learning_rate='auto')
+            reduced = reducer.fit_transform(all_points)
+            title = f"VQ Phase Manifold with Offset (t-SNE, perplexity={perplexity})"
+        else:
+            raise ValueError("method must be either 'pca' or 'tsne'")
+
+        reduced = reduced.reshape(n_e, n_angles, 2)
+
+        # ===== 6. 绘图 =====
+        plt.figure(figsize=(7, 7))
+
+        if records is None:
+            for i in range(n_e):
+                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.6)
+                plt.scatter(reduced[i, 0, 0], reduced[i, 0, 1], c='k', s=10)
+        else:
+            for i in range(n_e):
+                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.2, color='gray')
+
+            for state_idx, phase_val in records:
+                angle_idx = int(phase_val * (n_angles - 1))
+                x, y_ = reduced[state_idx, angle_idx, :]
+                plt.scatter(x, y_, color='red', s=40)
+
+        plt.axis('equal')
+        plt.grid(True)
+        plt.title(title)
+        plt.show()
+        import ipdb; ipdb.set_trace()
 
 
 class EmbeddingEMA(nn.Module):
