@@ -914,10 +914,7 @@ class AMPAgent(common_agent.CommonAgent):
                     time_zs = extra_dict['quantized_z_out'].view(
                         self.minibatch_size // self.horizon_length, self.horizon_length, -1
                     )
-                    time_zs_lastframe = extra_dict['last_quantized_z_out'].view(
-                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
-                    )
-                    error = time_zs_lastframe[:, 1:] - time_zs[:, :-1]
+                    error = time_zs[:, 1:] - time_zs[:, :-1]
                     idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                           self.horizon_length, -1)
                     not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
@@ -953,7 +950,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + ar1_prior * getattr(humanoid_env, "manifold_move_coeff", 0.1)
+                        + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + regu_prior * 0.005
                 )
