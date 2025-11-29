@@ -40,9 +40,10 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
-            self.top_phase = 0.48
-            self.botton_phase = 0.29
-            self.debug_index = 39
+            self.top_phase = 1.0
+            self.botton_phase = 0.0
+            self.debug_index = 34
+            self.debug_freq = 0
             self.debug_phase_p = torch.full((1, 1), self.botton_phase , device='cuda')
 
             self.use_vae_prior = self.task_obs_size_detail.get("use_vae_prior", False)
@@ -293,7 +294,8 @@ class AMPZBuilder(AMPBuilder):
 
 
                 loss, state, indexes = self.quantizer(state)
-                # print(indexes, f, p)
+                # if not flags.debug:
+                #     print(indexes, f, p)
                 if flags.trigger_input:
                     flags.trigger_input = False
                     flags.debug = not flags.debug
@@ -302,13 +304,22 @@ class AMPZBuilder(AMPBuilder):
                 if flags.debug:
                     B = state.shape[0]
                       # 默认为 0
-                    print(self.debug_index, f, p)
+                    # print(self.debug_index, f, p)
                     # 为 batch 中的每个样本强制使用这个索引
                     debug_indices = torch.full((B,), fill_value=self.debug_index,
                                                dtype=torch.long, device=state.device)
                     state = self.quantizer.embedding(debug_indices)
 
-                    f = torch.tensor([[1.5]], device=state.device)  # fixed frequency
+                    if flags.debug:
+                        if flags.freq_inc:
+                            self.debug_freq += 0.05
+                            flags.freq_inc = not flags.freq_inc
+                            print("current debug frequency", self.debug_freq)
+                        elif flags.freq_dec:
+                            self.debug_freq -= 0.05
+                            flags.freq_dec = not flags.freq_dec
+                            print("current debug frequency", self.debug_freq)
+                    f = torch.tensor([[self.debug_freq]], device=state.device)  # fixed frequency
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
                         self.debug_phase_p > self.top_phase,

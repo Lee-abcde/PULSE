@@ -159,6 +159,8 @@ class BaseTask():
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_I, "trigger_input")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "show_progress")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "change_color")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_UP, "freq_up")  # add here
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_DOWN, "freq_down")  # add here
 
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_SPACE, "PAUSE")
 
@@ -401,7 +403,14 @@ class BaseTask():
                 elif evt.action == "change_color" and evt.value > 0:
                     self.change_char_color()
                     print("Change character color")
-            
+
+                elif evt.action == "freq_up" and evt.value > 0:
+                    flags.freq_inc = not flags.freq_inc
+                    print("debug_freq increased:", flags.freq_inc)
+
+                elif evt.action == "freq_down" and evt.value > 0:
+                    flags.freq_dec = not flags.freq_dec
+                    print("debug_freq decreased:", flags.freq_dec)
             if self.recording_state_change:
                 if not self.recording:
                     if not flags.server_mode:
