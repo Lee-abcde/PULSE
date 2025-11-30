@@ -965,7 +965,7 @@ class AMPAgent(common_agent.CommonAgent):
                 #     ar1_prior = torch.norm(error, dim=-1).mean()
                 #     info_dict["kin_ar1"] = ar1_prior
                 frequency = extra_dict['frequency']
-                freq_min = 1.5
+                freq_min = 1.0
                 freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
                 info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
 
@@ -982,7 +982,7 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
                 freq_diff[not_consecs] = 0
                 freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
-                info_dict["kin_freq_smooth"] = freq_smooth_loss
+                info_dict["kin_freq_smooth"] = freq_smooth_loss * 0.001
                 # ----------- AR1 连续性约束 for state -----------
                 time_states = pred_state.view(self.minibatch_size // self.horizon_length,
                                               self.horizon_length, -1)
@@ -1006,7 +1006,7 @@ class AMPAgent(common_agent.CommonAgent):
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
-                        + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
+                        + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.005)
                         + regu_prior * 0.005
                 )
 
