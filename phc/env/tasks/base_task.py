@@ -159,6 +159,17 @@ class BaseTask():
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_I, "trigger_input")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "show_progress")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "change_color")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_UP, "freq_up")  # add here
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_DOWN, "freq_down")  # add here
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "P_lower_down")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "P_lower_up")
+
+            # Upper bound of P
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "P_upper_down")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_4, "P_upper_up")
+
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_5, "Index_down")
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_6, "Index_up")
 
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_SPACE, "PAUSE")
 
@@ -341,6 +352,7 @@ class BaseTask():
                     self._clear_recorded_states()
                 elif evt.action == "reset" and evt.value > 0:
                     self.reset()
+                    flags.reset = not flags.reset
                 elif evt.action == "follow" and evt.value > 0:
                     flags.follow = not flags.follow
                 elif evt.action == "fixed" and evt.value > 0:
@@ -401,7 +413,37 @@ class BaseTask():
                 elif evt.action == "change_color" and evt.value > 0:
                     self.change_char_color()
                     print("Change character color")
-            
+                elif evt.action == "freq_up" and evt.value > 0:
+                    flags.freq_inc = not flags.freq_inc
+                    print("debug_freq increased:", flags.freq_inc)
+
+                elif evt.action == "freq_down" and evt.value > 0:
+                    flags.freq_dec = not flags.freq_dec
+                    print("debug_freq decreased:", flags.freq_dec)
+
+                elif evt.action == "P_lower_down" and evt.value > 0:
+                    flags.P_lower_dec = not flags.P_lower_dec
+                    print("P lower bound decrease:", flags.P_lower_dec)
+
+                elif evt.action == "P_lower_up" and evt.value > 0:
+                    flags.P_lower_inc = not flags.P_lower_inc
+                    print("P lower bound increase:", flags.P_lower_inc)
+
+                elif evt.action == "P_upper_down" and evt.value > 0:
+                    flags.P_upper_dec = not flags.P_upper_dec
+                    print("P upper bound decrease:", flags.P_upper_dec)
+
+                elif evt.action == "P_upper_up" and evt.value > 0:
+                    flags.P_upper_inc = not flags.P_upper_inc
+                    print("P upper bound increase:", flags.P_upper_inc)
+
+                elif evt.action == "Index_down" and evt.value > 0:
+                    flags.Index_dec = not flags.Index_dec
+                    print("Index decrease:", flags.Index_dec)
+
+                elif evt.action == "Index_up" and evt.value > 0:
+                    flags.Index_inc = not flags.Index_inc
+                    print("Index increase:", flags.Index_inc)
             if self.recording_state_change:
                 if not self.recording:
                     if not flags.server_mode:

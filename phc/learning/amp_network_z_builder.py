@@ -40,8 +40,8 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
-            self.top_phase = -0.0
-            self.bottom_phase = -0.01
+            self.top_phase = 1.0
+            self.bottom_phase = 0.0
             self.debug_index = 23
             self.debug_freq = 1.49
             self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
@@ -298,9 +298,47 @@ class AMPZBuilder(AMPBuilder):
                     # self.debug_index += 1
                 # print(indexes, f, p)
                 if flags.debug:
+                    if flags.reset:
+                        self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
+                        flags.reset = not flags.reset
+                        print("Reset Start Phase")
+                    if flags.freq_inc:
+                        self.debug_freq += 0.05
+                        flags.freq_inc = not flags.freq_inc
+                        print("current debug frequency", self.debug_freq)
+                    elif flags.freq_dec:
+                        self.debug_freq -= 0.05
+                        flags.freq_dec = not flags.freq_dec
+                        print("current debug frequency", self.debug_freq)
+
+                    if flags.Index_dec:
+                        self.debug_index -= 1
+                        flags.Index_dec = not flags.Index_dec
+                        print("current debug index", self.debug_index)
+                    elif flags.Index_inc:
+                        self.debug_index += 1
+                        flags.Index_inc = not flags.Index_inc
+                        print("current debug index", self.debug_index)
+
+                    if flags.P_upper_inc:
+                        self.top_phase += 0.05
+                        flags.P_upper_inc = not flags.P_upper_inc
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    elif flags.P_upper_dec:
+                        self.top_phase -= 0.05
+                        flags.P_upper_dec = not flags.P_upper_dec
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    if flags.P_lower_inc:
+                        self.bottom_phase += 0.05
+                        flags.P_lower_inc = not flags.P_lower_inc
+                        print("current phase range:", self.bottom_phase, self.top_phase)
+                    elif flags.P_lower_dec:
+                        self.bottom_phase -= 0.05
+                        flags.P_lower_dec = not flags.P_lower_dec
+                        print("current phase range:", self.bottom_phase, self.top_phase)
                     B = state.shape[0]
                       # 默认为 0
-                    print(self.debug_index, f, p)
+                    # print(self.debug_index, f, p)
                     # 为 batch 中的每个样本强制使用这个索引
                     debug_indices = torch.full((B,), fill_value=self.debug_index,
                                                dtype=torch.long, device=state.device)
