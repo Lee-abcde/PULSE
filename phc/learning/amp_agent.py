@@ -945,10 +945,10 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_state_smooth"] = state_smooth_loss
 
                 # frequency lower bound loss
-                frequency = extra_dict['frequency']
-                freq_min = 1.5
-                freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
-                info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
+                # frequency = extra_dict['frequency']
+                # freq_min = 1.5
+                # freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
+                # info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
                 # # ----------- 正则项 -----------
                 z_q = extra_dict['quantized_z_out']
                 z_b = extra_dict['z_before_quant']
@@ -956,24 +956,24 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_prior_regu"] = regu_prior
 
                 # state regu
-                state = extra_dict['state_after_quant']
-                state_before = extra_dict['state_before_quant']
-                mod0 = state[:, 0::3]  # 第0类维度
-                mod1 = state[:, 1::3]  # 第1类维度
-                mod0_before = state_before[:, 0::3]  # 第0类维度
-                mod1_before = state_before[:, 1::3]  # 第1类维度
-                regu_state_loss = (mod0 ** 2).mean() + (mod1 ** 2).mean() + (mod0_before ** 2).mean() + (mod1_before ** 2).mean()
-                regu_state_loss = regu_state_loss * 0.001
-                info_dict["kin_amplitude_regu"] = regu_state_loss
+                # state = extra_dict['state_after_quant']
+                # state_before = extra_dict['state_before_quant']
+                # mod0 = state[:, 0::3]  # 第0类维度
+                # mod1 = state[:, 1::3]  # 第1类维度
+                # mod0_before = state_before[:, 0::3]  # 第0类维度
+                # mod1_before = state_before[:, 1::3]  # 第1类维度
+                # regu_state_loss = (mod0 ** 2).mean() + (mod1 ** 2).mean() + (mod0_before ** 2).mean() + (mod1_before ** 2).mean()
+                # regu_state_loss = regu_state_loss * 0.001
+                # info_dict["kin_amplitude_regu"] = regu_state_loss
                 # ----------- 总损失函数 -----------
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         + ar1_prior * getattr(humanoid_env, "manifold_move_coeff", 0.1)
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.1)
-                        + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
+                        # + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
-                        + regu_state_loss * 0.005
+                        # + regu_state_loss * 0.005
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss

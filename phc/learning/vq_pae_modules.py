@@ -41,6 +41,22 @@ class MLP(nn.Module):
             x = x + 1
         return x
 
+class LN_v2(nn.Module):
+    def __init__(self, dim, epsilon=1e-5):
+        super().__init__()
+        self.epsilon = epsilon
+
+        self.alpha = nn.Parameter(torch.ones([1, 1, dim]), requires_grad=True)
+        self.beta = nn.Parameter(torch.zeros([1, 1, dim]), requires_grad=True)
+
+    def forward(self, x):
+        mean = x.mean(axis=-1, keepdim=True)
+        var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
+        std = (var + self.epsilon).sqrt()
+        y = (x - mean) / std
+        y = y * self.alpha + self.beta
+        return y
+
 class LN_v3(nn.Module):
     def __init__(self, dim, epsilon=1e-8, keep_std=False):
         super().__init__()

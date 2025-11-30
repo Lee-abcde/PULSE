@@ -695,7 +695,7 @@ class AMPZBuilder(AMPBuilder):
                                                  dtype=np.float32)), requires_grad=False)
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
-                normalizer = partial(LN_v3, keep_std=True)
+                normalizer = partial(LN_v2)
                 self.z_encoder = []
                 for i in range(self.pae_n_layers):
                     self.z_encoder.append(nn.Conv1d(encoder_channels[i], encoder_channels[i + 1],
