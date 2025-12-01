@@ -345,6 +345,10 @@ class AMPZBuilder(AMPBuilder):
                     state = self.quantizer.embedding(debug_indices)
 
                     f = torch.tensor([[self.debug_freq]], device=state.device)  # fixed frequency
+                    # prior_mu = self.compute_vqpae_prior(obs_dict, state, f)
+                    # prior_mu_3d = prior_mu.expand(-1, -1, 7)
+                    # return prior_mu_3d, None
+
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
                         self.debug_phase_p > self.top_phase,
@@ -359,7 +363,8 @@ class AMPZBuilder(AMPBuilder):
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
-                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori, "state_after_quant": state, "frequency": f}
+                              "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori,
+                              "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -390,8 +395,21 @@ class AMPZBuilder(AMPBuilder):
             prior_latent = self.z_prior(self_obs)
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
-           
-        
+
+        def compute_vqpae_prior(self, obs_dict, state_after_quant, frequency):
+            self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
+            state_concat = state_after_quant.unsqueeze(1).expand(-1, self_obs.shape[1], -1)
+            self_obs = torch.cat([self_obs, state_concat], dim=-1)
+
+            prior_latent = self.prior_z_encoder(self_obs.transpose(1, 2))
+            prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
+            offset = torch.mean(prior_latent1d, dim=2)
+            p = self.analytical_phase(prior_latent1d, frequency, offset)
+            angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
+
+            prior_manifold, _ = self.get_phase_manifold(state_after_quant, angles)
+            return prior_manifold
+
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
             eps = torch.randn_like(std)
@@ -757,7 +775,21 @@ class AMPZBuilder(AMPBuilder):
                 #         self.deconvs.append(nn.ELU())
                 # self.deconvs = nn.Sequential(*self.deconvs)
                 # init_mlp(self.deconvs, mlp_init)  # Initialize the decoder
-
+                ###############################
+                # prior
+                ###############################
+                self.prior_input_channels = self_obs_size + self.num_embed
+                prior_encoder_channels = [self.prior_input_channels] + [self.intermediate_channels] * (
+                            self.pae_n_layers - 1) + [self.n_latent_channels]
+                self.prior_z_encoder = []
+                for i in range(self.pae_n_layers):
+                    self.prior_z_encoder.append(nn.Conv1d(prior_encoder_channels[i], prior_encoder_channels[i + 1],
+                                                          self.pae_kernel_size, padding='same'))
+                    self.prior_z_encoder.append(normalizer(self.time_range))  # Requires normalizer
+                    self.prior_z_encoder.append(nn.ELU())
+                self.prior_z_encoder = nn.Sequential(*self.prior_z_encoder)
+                self.prior_phase_conv = nn.Sequential(
+                    nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
                 self.z_var = nn.Linear(in_features=self.embedding_size * 5, out_features=int(1))
