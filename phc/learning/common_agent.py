@@ -99,7 +99,12 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['obs_window'] = torch.zeros(
             buffer_shape, dtype=torch.float32, device=self.ppo_device
         )
-        self.tensor_list += ['next_obses', 'obs_window']
+        clip_embedding_dim = 512
+        clip_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, clip_embedding_dim)
+        self.experience_buffer.tensor_dict['clip_embedding_window'] = torch.zeros(
+            clip_buffer_shape, dtype=torch.float32, device=self.ppo_device
+        )
+        self.tensor_list += ['next_obses', 'obs_window', 'clip_embedding_window']
         return
 
     def train(self):
@@ -109,7 +114,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
         total_time = 0
         rep_count = 0
         self.frame = 0
-        self.obs = self.env_reset()
+        self.obs, self.clip_embedding = self.env_reset()
         self.curr_frames = self.batch_size_envs
 
         model_output_file = osp.join(self.network_path, self.config['name'])
@@ -273,7 +278,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
             'prev_actions': None, 
             'obs' : processed_obs,
             "obs_orig": obs_orig,
-            'rnn_states' : self.rnn_states
+            'rnn_states' : self.rnn_states,
+            'clip_embedding_window': obs['clip_embedding_window']
         }
 
         with torch.no_grad():
@@ -510,9 +516,9 @@ class CommonAgent(a2c_continuous.A2CAgent):
         return mb_advs
 
     def env_reset(self, env_ids=None):
-        obs = self.vec_env.reset(env_ids)
+        obs, clip_embedding = self.vec_env.reset(env_ids)
         obs = self.obs_to_tensors(obs)
-        return obs
+        return obs, clip_embedding
 
     def bound_loss(self, mu):
         if self.bounds_loss_coef is not None:

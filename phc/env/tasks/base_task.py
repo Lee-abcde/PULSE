@@ -88,6 +88,7 @@ class BaseTask():
         self.num_states = cfg["env"].get("numStates", 0)
         self.num_actions = cfg["env"]["numActions"]
         self.is_discrete = cfg["env"].get("is_discrete", False)
+        self.num_embeddings = cfg["env"].get("numEmbeddings", 512)
 
         self.control_freq_inv = cfg["env"].get("controlFrequencyInv", 1)
 
@@ -102,6 +103,7 @@ class BaseTask():
         self.reset_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         self.progress_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.randomize_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.clip_embedding_buf = torch.zeros((self.num_envs, self.num_embeddings), device=self.device, dtype=torch.float)
         self.extras = {}
 
         self.original_props = {}

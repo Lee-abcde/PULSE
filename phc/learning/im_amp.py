@@ -52,6 +52,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
             "prev_actions": None,
             "obs": obs,
             "rnn_states": self.states,
+            'clip_embedding_window': obs_dict["clip_embedding_window"]
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)
@@ -185,13 +186,16 @@ class IMAmpAgent(amp_agent.AMPAgent):
         self.has_batch_dimension = True
 
         need_init_rnn = self.is_rnn
-        obs_dict = self.env_reset()
+        obs_dict, clip_embedding = self.env_reset()
         batch_size = humanoid_env.num_envs
 
         W = self.window_size
         obs_dim = obs_dict['obs'].shape[-1]
+        clip_dim = clip_embedding.shape[-1]
         self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
         self.obs_window[:, -1, :] = obs_dict['obs']
+        self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
+        self.clip_embedding_window[:, -1, :] = clip_embedding
 
         if need_init_rnn:
             self.init_rnn()
@@ -204,18 +208,22 @@ class IMAmpAgent(amp_agent.AMPAgent):
 
         with torch.no_grad():
             while True:
-                obs_dict = self.env_reset(done_indices)
+                obs_dict, clip_embedding= self.env_reset(done_indices)
 
                 if (isinstance(done_indices, list) and len(done_indices) > 0) or \
                         (not isinstance(done_indices, list) and done_indices.numel() > 0):
                     self.obs_window[done_indices] = 0.0
                     self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
+                    self.clip_embedding_window[done_indices] = 0.0
+                    self.clip_embedding_window[done_indices, -1, :] = clip_embedding[done_indices]
 
-                action = self.get_action({'obs': self.obs_window}, is_determenistic=True)
+                action = self.get_action({'obs': self.obs_window, 'clip_embedding_window': self.clip_embedding_window}, is_determenistic=True)
                 obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action[:,-1,:])
 
                 self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
                 self.obs_window[:, -1, :] = obs_dict
+                self.clip_embedding_window = torch.roll(self.clip_embedding_window, shifts=-1, dims=1)
+                self.clip_embedding_window[:, -1, :] = clip_embedding
                 cr += r
                 steps += 1
                 done, info = self._post_step_eval(info, done.clone())
