@@ -285,7 +285,9 @@ class AMPZBuilder(AMPBuilder):
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
 
-                state_input = latent.mean(axis=-1)
+                text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
+                fusion_latent = torch.cat([latent, text_feat], dim=1)
+                state_input = fusion_latent.mean(axis=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -362,9 +364,10 @@ class AMPZBuilder(AMPBuilder):
                 manifold = y
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
+                projected_clip_embedding = self.state_proj_head(state)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
                               "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori,
-                              "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold}
+                              "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold, 'projected_clip_embedding': projected_clip_embedding}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -396,18 +399,24 @@ class AMPZBuilder(AMPBuilder):
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
 
-        def compute_vqpae_prior(self, obs_dict, state_after_quant, frequency):
+        def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
-            state_concat = state_after_quant.unsqueeze(1).expand(-1, self_obs.shape[1], -1)
-            self_obs = torch.cat([self_obs, state_concat], dim=-1)
+            self_obs = torch.cat([self_obs], dim=-1)
 
             prior_latent = self.prior_z_encoder(self_obs.transpose(1, 2))
+            text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
+            fusion_latent = torch.cat([prior_latent, text_feat], dim=1)
+            state_input = fusion_latent.mean(axis=-1)
+            state = self.prior_state_fc(state_input)
+            # state_ori = state
+
+            # loss, state, indexes = self.quantizer(state)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
             offset = torch.mean(prior_latent1d, dim=2)
             p = self.analytical_phase(prior_latent1d, frequency, offset)
             angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
 
-            prior_manifold, _ = self.get_phase_manifold(state_after_quant, angles)
+            prior_manifold, _ = self.get_phase_manifold(state, angles)
             return prior_manifold
 
         def reparameterize(self, mu, logvar):
@@ -722,6 +731,7 @@ class AMPZBuilder(AMPBuilder):
                 self.window = getattr(self, 'window', 0.23)
                 self.time_range = self.window_size
                 self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
+                self.clip_dim = getattr(self, 'clip_dim', 512)
 
                 self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
                 self.pae_n_layers = getattr(self, 'pae_n_layers', 2)
@@ -759,9 +769,13 @@ class AMPZBuilder(AMPBuilder):
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
                 # Output is shape [B, pae_state_dim] (which is self.embedding_size)
                  # define how many FC layers (configurable)
-                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
+                self.text_adapter = nn.Sequential(
+                    nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
+                    nn.ReLU()
+                )
+                n_channels_state_mlp = [self.n_latent_channels + self.clip_dim] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
-
+                self.state_proj_head = nn.Linear(self.num_embed, 512)
                 # ---- 5. Vector Quantizer ----
                 self.quantizer = VectorQuantizer(self.dict_size, self.num_embed, 0.25)
 
@@ -778,7 +792,7 @@ class AMPZBuilder(AMPBuilder):
                 ###############################
                 # prior
                 ###############################
-                self.prior_input_channels = self_obs_size + self.num_embed
+                self.prior_input_channels = self_obs_size
                 prior_encoder_channels = [self.prior_input_channels] + [self.intermediate_channels] * (
                             self.pae_n_layers - 1) + [self.n_latent_channels]
                 self.prior_z_encoder = []
@@ -790,6 +804,10 @@ class AMPZBuilder(AMPBuilder):
                 self.prior_z_encoder = nn.Sequential(*self.prior_z_encoder)
                 self.prior_phase_conv = nn.Sequential(
                     nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
+
+                prior_state_input_dim = self.n_latent_channels + self.clip_dim
+                n_channels_prior_state_mlp = [prior_state_input_dim] + [self.num_embed] * n_layers_state
+                self.prior_state_fc = MLPChannels(n_channels_prior_state_mlp, bn=False)
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
                 self.z_var = nn.Linear(in_features=self.embedding_size * 5, out_features=int(1))
