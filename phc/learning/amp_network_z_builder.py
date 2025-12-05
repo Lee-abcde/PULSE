@@ -73,8 +73,33 @@ class AMPZBuilder(AMPBuilder):
                 self._build_z_reader()
             if self.separate:
                 self._build_critic_z_mlp()
-                
-                
+
+            # import os
+            # import joblib
+            # from pathlib import Path
+            # script_dir = Path(__file__).parent
+            # relative_pkl_path = "../../data/amass/text_embedding_dict_clip.pkl"
+            # clip_pkl_path = script_dir / relative_pkl_path
+            #
+            # if os.path.exists(clip_pkl_path):
+            #     print(f"Loading CLIP embeddings from: {clip_pkl_path} ...")
+            #     with open(clip_pkl_path, "rb") as f:
+            #         self.clip_embedding_dict = joblib.load(f)
+            #
+            #     print("Loaded keys:", list(self.clip_embedding_dict.keys())[:10])
+            # else:
+            #     print("File does not exist!")
+            #
+            # all_embeddings = []
+            # all_texts = []
+            #
+            # for text, emb in self.clip_embedding_dict.items():
+            #     emb = torch.as_tensor(emb).view(-1).cuda()
+            #     all_embeddings.append(emb)
+            #     all_texts.append(text)
+            #
+            # self.master_embeddings = torch.stack(all_embeddings)
+            # self.master_texts = all_texts
             self.actor_mlp
 
         def load(self, params):
@@ -285,6 +310,28 @@ class AMPZBuilder(AMPBuilder):
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
 
+                ###############################################
+                # Check Text label
+                ###############################################
+                # clip_embedding_cur = obs_dict['clip_embedding_window'][:,-1,:].squeeze(0)
+                #
+                # def find_exact_embedding(target_emb, master_embeddings, master_texts):
+                #
+                #     target_emb = target_emb.view(1, -1)  # Make it (1, 512)
+                #     equality_mask = torch.eq(target_emb, master_embeddings)
+                #     match_index = torch.all(equality_mask, dim=1)
+                #     indices = torch.nonzero(match_index, as_tuple=True)[0]
+                #
+                #     if indices.numel() > 0:
+                #         first_match_index = indices[0].item()
+                #         return master_texts[first_match_index]
+                #     else:
+                #         return None
+                # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
+                # print("Predicted text:", text)
+                ###############################################
+
+
                 text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
                 fusion_latent = torch.cat([latent, text_feat], dim=1)
                 state_input = fusion_latent.mean(axis=-1)
@@ -347,7 +394,22 @@ class AMPZBuilder(AMPBuilder):
                     state = self.quantizer.embedding(debug_indices)
 
                     f = torch.tensor([[self.debug_freq]], device=state.device)  # fixed frequency
-                    # prior_mu = self.compute_vqpae_prior(obs_dict, state, f)
+                    # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
+                    #     embedding = clip_embedding_dict.get(key)
+                    #
+                    #     if embedding is None:
+                    #         print("key not found")
+                    #         import ipdb;
+                    #         ipdb.set_trace()
+                    #
+                    #     if isinstance(embedding, np.ndarray):
+                    #         embedding = torch.from_numpy(embedding).float()
+                    #     elif isinstance(embedding, (list, tuple)):
+                    #         embedding = torch.tensor(embedding, dtype=torch.float32)
+                    #
+                    #     return embedding
+                    # clip_embedding = get_clip_embedding("walk forward", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
+                    # prior_mu = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
                     # prior_mu_3d = prior_mu.expand(-1, -1, 7)
                     # return prior_mu_3d, None
 
@@ -404,7 +466,7 @@ class AMPZBuilder(AMPBuilder):
             self_obs = torch.cat([self_obs], dim=-1)
 
             prior_latent = self.prior_z_encoder(self_obs.transpose(1, 2))
-            text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
+            text_feat = self.text_adapter(clip_embedding_window).permute(0, 2, 1)
             fusion_latent = torch.cat([prior_latent, text_feat], dim=1)
             state_input = fusion_latent.mean(axis=-1)
             state = self.prior_state_fc(state_input)
