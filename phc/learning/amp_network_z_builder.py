@@ -463,6 +463,10 @@ class AMPZBuilder(AMPBuilder):
 
         def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
+            if self.training:
+                drop_prob = 0.4
+                mask = (torch.rand(self_obs.shape[0], 1, 1, device=self_obs.device) > drop_prob).float()
+                self_obs = self_obs * mask
             self_obs = torch.cat([self_obs], dim=-1)
 
             prior_latent = self.prior_z_encoder(self_obs.transpose(1, 2))
@@ -479,7 +483,8 @@ class AMPZBuilder(AMPBuilder):
             angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
 
             prior_manifold, _ = self.get_phase_manifold(state, angles)
-            return prior_manifold
+            prior_projected_embedding = self.state_proj_head(state)
+            return prior_manifold, state, prior_projected_embedding
 
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
@@ -833,7 +838,6 @@ class AMPZBuilder(AMPBuilder):
                  # define how many FC layers (configurable)
                 self.text_adapter = nn.Sequential(
                     nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
-                    nn.ReLU()
                 )
                 n_channels_state_mlp = [self.n_latent_channels + self.clip_dim] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)

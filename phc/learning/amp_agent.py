@@ -960,19 +960,27 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_vq_loss"] = vq_loss
 
                 # prior loss
-                # Detach inputs so the Prior Loss cannot affect the Encoder
                 clip_embedding_window = batch_dict['clip_embedding_window']
                 freq_input = extra_dict['frequency'].detach()
-
-                # Compute Prior using detached inputs
-                prior_mu = self.model.a2c_network.compute_vqpae_prior(
+                target_state = extra_dict['state_after_quant'].detach()
+                target_manifold = extra_dict['full_quantized_z_out'].detach()
+                prior_mu, prior_state, prior_proj_emb = self.model.a2c_network.compute_vqpae_prior(
                     batch_dict,
                     clip_embedding_window,  # Detached
                     freq_input  # Detached
                 )
-                vq_target = extra_dict['full_quantized_z_out'].detach()
-                mse_per_sample = (prior_mu - vq_target).pow(2).sum(dim=1)
+                loss_prior_state = (prior_state - target_state).pow(2).mean()
+                info_dict["kin_prior_state_loss"] = loss_prior_state
+
+                mse_per_sample = (prior_mu - target_manifold).pow(2).sum(dim=1)
                 prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
+                info_dict["kin_prior_loss"] = prior_loss
+
+                prior_state_norm = torch.nn.functional.normalize(prior_proj_emb, p=2, dim=1)
+                clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding_window'].mean(dim=1), p=2, dim=1)
+                loss_prior_semantic = 1.0 - (prior_state_norm * clip_norm).sum(dim=1).mean()
+                info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
+
                 # ----------- AR1 连续性约束（可选）-----------
                 # ar1_prior = 0
                 # if humanoid_env.use_ar1_prior:
@@ -1023,7 +1031,7 @@ class AMPAgent(common_agent.CommonAgent):
                 z_q = extra_dict['quantized_z_out']
                 z_b = extra_dict['z_before_quant']
                 regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
-                info_dict["kin_prior_regu"] = regu_prior
+                info_dict["kin_regu"] = regu_prior
 
                 # ----------- (Semantic Alignment Loss) -----------
                 target_clip_avg = batch_dict['clip_embedding_window'].mean(dim=1)
@@ -1036,7 +1044,9 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.01)
+                        + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
+                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
+                        + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.005)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
