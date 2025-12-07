@@ -959,7 +959,7 @@ class AMPAgent(common_agent.CommonAgent):
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
-                # prior loss
+                #  ----------- prior loss -----------
                 clip_embedding_window = batch_dict['clip_embedding_window']
                 freq_input = extra_dict['frequency'].detach()
                 target_state = extra_dict['state_after_quant'].detach()
@@ -973,14 +973,23 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_prior_state_loss"] = loss_prior_state
 
                 mse_per_sample = (prior_mu - target_manifold).pow(2).sum(dim=1)
-                prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
-                info_dict["kin_prior_loss"] = prior_loss
+                prior_manifold_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
+                info_dict["kin_prior_manifold_loss"] = prior_manifold_loss
 
                 prior_state_norm = torch.nn.functional.normalize(prior_proj_emb, p=2, dim=1)
                 clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding_window'].mean(dim=1), p=2, dim=1)
                 loss_prior_semantic = 1.0 - (prior_state_norm * clip_norm).sum(dim=1).mean()
                 info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
-
+                # prior's action loss
+                self_obs_size = self.vec_env.env.task.get_self_obs_size()
+                curr_self_obs = batch_dict['obs'][:, ..., :self_obs_size]
+                prior_decoder_input = torch.cat([curr_self_obs, prior_mu.permute(0, 2, 1)], dim=-1)
+                prior_h = self.model.a2c_network.prior_aux_mlp(prior_decoder_input)
+                prior_action_raw = self.model.a2c_network.prior_aux_mu(prior_h)
+                prior_action = self.model.a2c_network.prior_aux_mu_act(prior_action_raw)
+                prior_action_loss = ((prior_action - gt_action_full).norm(
+                    dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
+                info_dict['kin_prior_action_loss'] = prior_action_loss
                 # ----------- AR1 连续性约束（可选）-----------
                 # ar1_prior = 0
                 # if humanoid_env.use_ar1_prior:
@@ -1044,8 +1053,9 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + prior_action_loss
                         + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
-                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
+                        + prior_manifold_loss * getattr(humanoid_env, "prior_coeff", 0.5)
                         + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.005)
