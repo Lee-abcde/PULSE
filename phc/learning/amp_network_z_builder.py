@@ -467,12 +467,12 @@ class AMPZBuilder(AMPBuilder):
                 drop_prob = 0.4
                 mask = (torch.rand(self_obs.shape[0], 1, 1, device=self_obs.device) > drop_prob).float()
                 self_obs = self_obs * mask
-            self_obs = torch.cat([self_obs], dim=-1)
-
-            prior_latent = self.prior_z_encoder(self_obs.transpose(1, 2))
             text_feat = self.text_adapter(clip_embedding_window).permute(0, 2, 1)
-            fusion_latent = torch.cat([prior_latent, text_feat], dim=1)
-            state_input = fusion_latent.mean(axis=-1)
+            self_obs = torch.cat([self_obs.permute(0, 2, 1), text_feat], dim=1)
+
+            prior_latent = self.prior_z_encoder(self_obs)
+
+            state_input = prior_latent.mean(axis=-1)
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
@@ -859,7 +859,7 @@ class AMPZBuilder(AMPBuilder):
                 # prior
                 ###############################
                 self.prior_input_channels = self_obs_size
-                prior_encoder_channels = [self.prior_input_channels] + [self.intermediate_channels] * (
+                prior_encoder_channels = [self.prior_input_channels + self.clip_dim] + [self.intermediate_channels] * (
                             self.pae_n_layers - 1) + [self.n_latent_channels]
                 self.prior_z_encoder = []
                 for i in range(self.pae_n_layers):
@@ -871,7 +871,7 @@ class AMPZBuilder(AMPBuilder):
                 self.prior_phase_conv = nn.Sequential(
                     nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
-                prior_state_input_dim = self.n_latent_channels + self.clip_dim
+                prior_state_input_dim = self.n_latent_channels
                 n_channels_prior_state_mlp = [prior_state_input_dim] + [self.num_embed] * n_layers_state
                 self.prior_state_fc = MLPChannels(n_channels_prior_state_mlp, bn=False)
             elif self.z_type == 'vq_vae_hybrid':
