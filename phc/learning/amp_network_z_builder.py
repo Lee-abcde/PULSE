@@ -339,7 +339,7 @@ class AMPZBuilder(AMPBuilder):
                 state_ori = state
 
 
-                loss, state, indexes = self.quantizer(state)
+                loss, state, indexes, perplexity = self.quantizer(state)
                 # print(indexes, f, p)
                 if flags.trigger_input:
                     flags.trigger_input = False
@@ -429,7 +429,8 @@ class AMPZBuilder(AMPBuilder):
                 projected_clip_embedding = self.state_proj_head(state)
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
                               "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori,
-                              "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold, 'projected_clip_embedding': projected_clip_embedding}
+                              "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold,
+                              'projected_clip_embedding': projected_clip_embedding, "perplexity": perplexity}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -476,7 +477,7 @@ class AMPZBuilder(AMPBuilder):
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
-            # loss, state, indexes = self.quantizer(state)
+            # loss, state, indexes, perplexity = self.quantizer(state)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
             offset = torch.mean(prior_latent1d, dim=2)
             p = self.analytical_phase(prior_latent1d, frequency, offset)

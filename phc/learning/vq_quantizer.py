@@ -310,12 +310,12 @@ class VectorQuantizer(nn.Module):
 
             encodings = torch.zeros(encoding_indices.unsqueeze(1).shape[0], self.num_embed, device=z.device)
             encodings.scatter_(1, encoding_indices.unsqueeze(1), 1)
-            # avg_probs = torch.mean(encodings, dim=0)
-            # perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
+            avg_probs = torch.mean(encodings, dim=0)
+            perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
             # min_encodings = encodings
         else:
             loss = torch.tensor(0., device=z.device)
-            # perplexity = torch.zeros(1, device=z.device)
+            perplexity = torch.zeros(1, device=z.device)
             # min_encodings = torch.zeros(1, device=z.device)
 
         # update the running usage
@@ -333,7 +333,7 @@ class VectorQuantizer(nn.Module):
             contra_loss = F.cross_entropy(dis, torch.zeros((dis.size(0),), dtype=torch.long, device=dis.device))
             loss = loss + contra_loss
 
-        return loss, z_q, encoding_indices
+        return loss, z_q, encoding_indices, perplexity
 
     def reinitialize(self):
         # online clustered reinitialisation for unoptimized points

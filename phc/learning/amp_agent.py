@@ -958,7 +958,7 @@ class AMPAgent(common_agent.CommonAgent):
                 # ----------- 从模型中直接拿 VQ 损失 -----------
                 vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
-
+                info_dict["kin_perplexity"] = extra_dict['perplexity']
                 # prior loss
                 clip_embedding_window = batch_dict['clip_embedding_window']
                 freq_input = extra_dict['frequency'].detach()
