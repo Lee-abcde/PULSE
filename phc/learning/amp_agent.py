@@ -972,7 +972,7 @@ class AMPAgent(common_agent.CommonAgent):
                 loss_prior_state = (prior_state - target_state).pow(2).mean()
                 info_dict["kin_prior_state_loss"] = loss_prior_state
 
-                mse_per_sample = (prior_mu - target_manifold).pow(2).sum(dim=1)
+                mse_per_sample = (prior_mu - target_manifold).pow(2).mean(dim=1)
                 prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
                 info_dict["kin_prior_loss"] = prior_loss
 
