@@ -983,10 +983,16 @@ class AMPAgent(common_agent.CommonAgent):
                 # prior's action loss
                 self_obs_size = self.vec_env.env.task.get_self_obs_size()
                 curr_self_obs = batch_dict['obs'][:, ..., :self_obs_size]
+                    # add drop out for decoder
+                decoder_drop_prob = 0.4
+                decoder_mask = (torch.rand(curr_self_obs.shape[0], 1, 1,
+                                           device=curr_self_obs.device) > decoder_drop_prob).float()
+                curr_self_obs = curr_self_obs * decoder_mask
                 prior_decoder_input = torch.cat([curr_self_obs, prior_mu.permute(0, 2, 1)], dim=-1)
-                prior_h = self.model.a2c_network.prior_aux_mlp(prior_decoder_input)
-                prior_action_raw = self.model.a2c_network.prior_aux_mu(prior_h)
-                prior_action = self.model.a2c_network.prior_aux_mu_act(prior_action_raw)
+
+                prior_h = self.model.a2c_network.actor_mlp(prior_decoder_input)  # Use Main MLP
+                prior_action_raw = self.model.a2c_network.mu(prior_h)  # Use Main Head
+                prior_action = self.model.a2c_network.mu_act(prior_action_raw)  # Use Main Activation
                 prior_action_loss = ((prior_action - gt_action_full).norm(
                     dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
                 info_dict['kin_prior_action_loss'] = prior_action_loss

@@ -465,7 +465,7 @@ class AMPZBuilder(AMPBuilder):
         def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
             if self.training:
-                drop_prob = 0.4
+                drop_prob = 0.1
                 mask = (torch.rand(self_obs.shape[0], 1, 1, device=self_obs.device) > drop_prob).float()
                 self_obs = self_obs * mask
             text_feat = self.text_adapter(clip_embedding_window).permute(0, 2, 1)
@@ -875,24 +875,24 @@ class AMPZBuilder(AMPBuilder):
                 prior_state_input_dim = self.n_latent_channels
                 n_channels_prior_state_mlp = [prior_state_input_dim] + [self.num_embed] * n_layers_state
                 self.prior_state_fc = MLPChannels(n_channels_prior_state_mlp, bn=False)
-                prior_decoder_input_shape = self.self_obs_size + self.n_latent_channels
-                prior_mlp_args = {
-                    'input_size': prior_decoder_input_shape,
-                    'units': self.units,
-                    'activation': self.activation,
-                    'norm_func_name': self.normalization,
-                    'dense_func': torch.nn.Linear,
-                    'd2rl': self.is_d2rl,
-                    'norm_only_first_layer': self.norm_only_first_layer
-                }
-                self.prior_aux_mlp = self._build_mlp(**prior_mlp_args)
-                self.actions_num = 69
-                self.prior_aux_mu = nn.Linear(self.units[-1], self.actions_num)
-                self.prior_aux_mu_act = self.activations_factory.create(self.space_config['mu_activation'])
-                mu_init = self.init_factory.create(**self.space_config['mu_init'])
-                mu_init(self.prior_aux_mu.weight)
-                if self.prior_aux_mu.bias is not None:
-                    torch.nn.init.zeros_(self.prior_aux_mu.bias)
+                # prior_decoder_input_shape = self.self_obs_size + self.n_latent_channels
+                # prior_mlp_args = {
+                #     'input_size': prior_decoder_input_shape,
+                #     'units': self.units,
+                #     'activation': self.activation,
+                #     'norm_func_name': self.normalization,
+                #     'dense_func': torch.nn.Linear,
+                #     'd2rl': self.is_d2rl,
+                #     'norm_only_first_layer': self.norm_only_first_layer
+                # }
+                # self.prior_aux_mlp = self._build_mlp(**prior_mlp_args)
+                # self.actions_num = 69
+                # self.prior_aux_mu = nn.Linear(self.units[-1], self.actions_num)
+                # self.prior_aux_mu_act = self.activations_factory.create(self.space_config['mu_activation'])
+                # mu_init = self.init_factory.create(**self.space_config['mu_init'])
+                # mu_init(self.prior_aux_mu.weight)
+                # if self.prior_aux_mu.bias is not None:
+                #     torch.nn.init.zeros_(self.prior_aux_mu.bias)
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
                 self.z_var = nn.Linear(in_features=self.embedding_size * 5, out_features=int(1))
