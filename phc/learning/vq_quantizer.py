@@ -267,7 +267,7 @@ class VectorQuantizer(nn.Module):
         for updater in self.updater:
             updater.clear_buffer()
 
-    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+    def forward(self, z, temp=None, rescale_logits=False, return_logits=False, freeze_codebook=False):
         assert temp is None or temp == 1.0, "Only for interface compatible with Gumbel"
         assert rescale_logits == False, "Only for interface compatible with Gumbel"
         assert return_logits == False, "Only for interface compatible with Gumbel"
@@ -304,7 +304,12 @@ class VectorQuantizer(nn.Module):
 
         if self.training:
             # compute loss for embedding
-            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + torch.mean((z_q - z.detach()) ** 2)
+            commitment_loss = self.beta * torch.mean((z_q.detach() - z) ** 2)
+            if freeze_codebook:
+                codebook_loss = torch.tensor(0., device=z.device)
+            else:
+                codebook_loss = torch.mean((z_q - z.detach()) ** 2)
+            loss = commitment_loss + codebook_loss
             # preserve gradients
             z_q = z + (z_q - z).detach()
 
@@ -319,12 +324,12 @@ class VectorQuantizer(nn.Module):
             # min_encodings = torch.zeros(1, device=z.device)
 
         # update the running usage
-        if self.training and self.calling_from >= 0:
+        if self.training and self.calling_from >= 0 and not freeze_codebook:
             np.add.at(self.usage[self.calling_from], encoding_indices.detach().cpu().numpy(), 1)
             self.updater[self.calling_from].update_buffer(encodings, d, z_flattened)
 
         # contrastive loss
-        if self.training and self.contras_loss:
+        if self.training and self.contras_loss and not freeze_codebook:
             sort_distance, indices = d.sort(dim=0)
             dis_pos = sort_distance[-max(1, int(sort_distance.size(0) / self.num_embed)):, :].mean(dim=0,
                                                                                                    keepdim=True)

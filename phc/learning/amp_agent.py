@@ -964,11 +964,12 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_input = extra_dict['frequency'].detach()
                 target_state = extra_dict['state_after_quant'].detach()
                 target_manifold = extra_dict['full_quantized_z_out'].detach()
-                prior_mu, prior_state, prior_proj_emb = self.model.a2c_network.compute_vqpae_prior(
+                prior_mu, prior_state, prior_proj_emb, prior_vq_loss = self.model.a2c_network.compute_vqpae_prior(
                     batch_dict,
                     clip_embedding_window,  # Detached
                     freq_input  # Detached
                 )
+                info_dict["kin_prior_vq_loss"] = prior_vq_loss
                 loss_prior_state = (prior_state - target_state).pow(2).mean()
                 info_dict["kin_prior_state_loss"] = loss_prior_state
 
@@ -1044,6 +1045,7 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + prior_vq_loss * getattr(humanoid_env, "prior_vq_coeff", 0.5)
                         + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
                         + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
                         + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)

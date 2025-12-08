@@ -477,7 +477,7 @@ class AMPZBuilder(AMPBuilder):
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
-            # loss, state, indexes, perplexity = self.quantizer(state)
+            loss, state, _, _ = self.quantizer(state, freeze_codebook=True)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
             offset = torch.mean(prior_latent1d, dim=2)
             p = self.analytical_phase(prior_latent1d, frequency, offset)
@@ -485,7 +485,7 @@ class AMPZBuilder(AMPBuilder):
 
             prior_manifold, _ = self.get_phase_manifold(state, angles)
             prior_projected_embedding = self.state_proj_head(state)
-            return prior_manifold, state, prior_projected_embedding
+            return prior_manifold, state, prior_projected_embedding, loss
 
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
