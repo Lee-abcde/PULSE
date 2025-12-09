@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from collections import Counter
 
 class Quantizer(nn.Module):
     def __init__(self, n_e, e_dim, beta):
@@ -399,27 +400,108 @@ class VectorQuantizer(nn.Module):
         reduced = reduced.reshape(n_e, n_angles, 2)
 
         # ----------- 绘图部分 -----------
-        plt.figure(figsize=(7, 7))
+        plt.figure(figsize=(16, 8))  # Increase height slightly for the colorbar
 
-        if records is None:
-            # 没有记录 -> 画全部轨迹
-            cmap = plt.cm.get_cmap('hsv', n_e)
-            for i in range(n_e):
-                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.6)
-                plt.scatter(reduced[i, 0, 0], reduced[i, 0, 1], c='k', s=10)  # 起点黑点
+        # --- Subplot 1: Phase Circle Trajectories ---
+        ax1 = plt.subplot(1, 2, 1)
+
+        # Draw faint background trajectories for all codes
+        # This helps see the manifold structure
+        for i in range(n_e):
+            ax1.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.1, color='gray', linewidth=0.5)
+
+        if records:
+            # Highlight specific records and connect them with lines
+            record_points = []
+            for code_idx, phase_val in records:
+                if 0 <= code_idx < n_e:
+                    # Logic: phase is [-0.5, 0.5], mapping to index [0, n_angles-1]
+                    # Normalize phase from [-0.5, 0.5] to [0, 1]
+                    norm_phase = phase_val + 0.5
+                    # Map to index
+                    angle_idx = int(norm_phase * (n_angles - 1))
+                    # Clip to ensure bounds safety
+                    angle_idx = max(0, min(n_angles - 1, angle_idx))
+
+                    x, y_ = reduced[code_idx, angle_idx, :]
+                    record_points.append((x, y_))
+
+                    # Plot the point (keep the red dots for emphasis)
+                    ax1.scatter(x, y_, color='red', s=30, alpha=0.8, edgecolors='black', linewidth=0.5, zorder=10)
+
+            # Draw lines connecting the records with a color gradient
+            if len(record_points) > 1:
+                # Use 'viridis_r' colormap: goes from lighter yellow (fair) to darker blue/purple (dark)
+                cmap = plt.cm.viridis_r
+                num_segments = len(record_points) - 1
+
+                for i in range(num_segments):
+                    p1 = record_points[i]
+                    p2 = record_points[i + 1]
+
+                    # Calculate color based on progress through the records
+                    progress = i / max(1, num_segments - 1)
+                    color = cmap(progress)
+
+                    # Draw the line segment
+                    ax1.plot([p1[0], p2[0]], [p1[1], p2[1]], color=color, linewidth=1.5, alpha=0.8, zorder=9)
+
+                # Add a colorbar to indicate the temporal order
+                sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=len(records) - 1))
+                sm.set_array([])
+                cbar = plt.colorbar(sm, ax=ax1, ticks=[0, len(records) - 1], orientation='horizontal', fraction=0.04,
+                                    pad=0.1)
+                cbar.set_ticklabels(['Start', 'End'])
+                cbar.set_label('Record Sequence (Fair -> Dark Color)')
+
+        ax1.set_title(f"VQ Phase Trajectories \n(Red dots = usage records, Lines = sequence)")
+        ax1.set_xlabel("Dim 1")
+        ax1.set_ylabel("Dim 2")
+        ax1.axis('equal')
+        ax1.grid(True, alpha=0.3)
+
+        # --- Subplot 2: Frequency Bar Chart ---
+        plt.subplot(1, 2, 2)
+
+        if records:
+            # Count frequency of each code index
+            indices = [r[0] for r in records]
+            counts = Counter(indices)
+
+            # Prepare x (all code indices) and y (counts)
+            x_axis = range(n_e)
+            y_axis = [counts.get(i, 0) for i in x_axis]
+
+            # Color bars: Highlight used codes in blue, unused in light gray
+            colors = ['steelblue' if c > 0 else 'lightgray' for c in y_axis]
+
+            plt.bar(x_axis, y_axis, color=colors, edgecolor='black', linewidth=0.5, alpha=0.8)
+
+            # Annotate Top 5 codes
+            if indices:
+                top_k = 5
+                most_common = counts.most_common(top_k)
+                info_text = "Top Used Codes:\n" + "\n".join([f"Idx {code}: {cnt}x" for code, cnt in most_common])
+
+                # Place text box in top right
+                plt.text(0.95, 0.95, info_text,
+                         transform=plt.gca().transAxes,
+                         fontsize=10, verticalalignment='top', horizontalalignment='right',
+                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+
+            plt.title(f"Code Usage Histogram (Total: {len(records)})")
+            plt.xlabel("Codebook Index")
+            plt.ylabel("Frequency")
+            plt.xlim(-1, n_e)
+
+            # Dynamic Y-limit to make it look nice
+            if len(indices) > 0:
+                plt.ylim(0, max(y_axis) * 1.15)
+
         else:
-            # 有记录 -> 画灰色轨迹 + 红点
-            for i in range(n_e):
-                plt.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.2, color='gray')
+            plt.text(0.5, 0.5, "No Records Provided", ha='center', va='center')
 
-            for state_idx, phase_val in records:
-                angle_idx = int(phase_val * (n_angles - 1))
-                x, y_ = reduced[state_idx, angle_idx, :]
-                plt.scatter(x, y_, color='red', s=40)
-
-        plt.axis('equal')
-        plt.grid(True)
-        plt.title(title)
+        plt.tight_layout()
         plt.show()
 
         import ipdb;

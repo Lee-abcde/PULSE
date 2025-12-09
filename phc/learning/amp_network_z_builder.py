@@ -345,7 +345,8 @@ class AMPZBuilder(AMPBuilder):
                     flags.trigger_input = False
                     flags.debug = not flags.debug
                     # self.debug_index += 1
-                # print(indexes, f, p)
+                # if not flags.debug:
+                #     print(indexes, f, p)
                 if flags.debug:
                     if flags.reset:
                         self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
@@ -408,10 +409,9 @@ class AMPZBuilder(AMPBuilder):
                     #         embedding = torch.tensor(embedding, dtype=torch.float32)
                     #
                     #     return embedding
-                    # clip_embedding = get_clip_embedding("walk forward", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
-                    # prior_mu = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
-                    # prior_mu_3d = prior_mu.expand(-1, -1, 7)
-                    # return prior_mu_3d, None
+                    # clip_embedding = get_clip_embedding("run", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
+                    # prior_mu, _, _, _ = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
+                    # return prior_mu, None
 
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
