@@ -1003,7 +1003,6 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
                 info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
 
-                pred_state = extra_dict['state_after_quant']
                 # optionally, mask out discontinuous episodes
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
@@ -1018,12 +1017,20 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
                 info_dict["kin_freq_smooth"] = freq_smooth_loss
                 # ----------- AR1 连续性约束 for state -----------
+                time_clip_wins = clip_embedding_window.view(self.minibatch_size // self.horizon_length,
+                                                            self.horizon_length,
+                                                            clip_embedding_window.shape[1],
+                                                            clip_embedding_window.shape[2])
+                win_diff = time_clip_wins[:, 1:] - time_clip_wins[:, :-1]
+                win_diff_flat = win_diff.reshape(-1, win_diff.shape[-2] * win_diff.shape[-1])
+                is_same_semantic = torch.norm(win_diff_flat, dim=-1) < 1e-4
+                pred_state = extra_dict['state_after_quant']
                 time_states = pred_state.view(self.minibatch_size // self.horizon_length,
                                               self.horizon_length, -1)
                 # difference between consecutive frames
                 state_diff = time_states[:, 1:] - time_states[:, :-1]
                 state_diff = state_diff.view(-1, state_diff.shape[-1])
-                state_diff[not_consecs] = 0
+                state_diff[~is_same_semantic] = 0
                 # L2 penalty on difference (encourages temporal smoothness)
                 state_smooth_loss = torch.norm(state_diff, dim=-1).mean()
                 info_dict["kin_state_smooth"] = state_smooth_loss
@@ -1045,16 +1052,17 @@ class AMPAgent(common_agent.CommonAgent):
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
-                        + prior_vq_loss * getattr(humanoid_env, "prior_vq_coeff", 0.5)
-                        + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
-                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
-                        + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
-                        + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.005)
+                        + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
                         + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
                         + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
+                        # ---------------- Prior Loss ----------------
+                        + prior_vq_loss * getattr(humanoid_env, "prior_vq_coeff", 0.5)
+                        + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
+                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
+                        + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss
