@@ -6,6 +6,12 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from collections import Counter
+import plotly.express as px
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+import pandas as pd
+import os
+from pathlib import Path
 
 class Quantizer(nn.Module):
     def __init__(self, n_e, e_dim, beta):
@@ -276,6 +282,10 @@ class VectorQuantizer(nn.Module):
         # z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_shape = z.shape
         z_flattened = z.view(-1, self.embed_dim)
+        # vis_script_dir = Path(__file__).parent.parent.parent
+        # relative_path = Path("./data/amass/vq_pae_records.csv")
+        # file_path = str(vis_script_dir / relative_path)
+        # self.visualize_vq_from_file(file_path)
         # records = [
         #     (156, 0.3390),
         # ]
@@ -504,6 +514,231 @@ class VectorQuantizer(nn.Module):
         plt.tight_layout()
         plt.show()
 
+        import ipdb;
+        ipdb.set_trace()
+
+    def visualize_vq_from_file(self, record_file_path, n_angles=100, device='cpu', method='pca', perplexity=30):
+        """
+        Visualizes the phase trajectories of the quantizer embeddings using Plotly,
+        coloring the recorded points based on semantic labels read directly from a CSV file.
+        The generated chart is interactive, supporting legend clicking to toggle data visibility.
+
+        Args:
+            record_file_path (str): The path to the CSV file containing the recorded data.
+            n_angles (int): Number of angles sampled for each embedding trajectory.
+            device (str): Device to run computation on ('cpu' or 'cuda:0').
+            method (str): Dimensionality reduction method ('pca' or 'tsne').
+            perplexity (int): Perplexity parameter for t-SNE (ignored if method='pca').
+        """
+        if not hasattr(self, 'embedding') or not hasattr(self.embedding, 'weight'):
+            print("Error: 'self' must have an 'embedding' attribute with a 'weight' tensor.")
+            return
+
+        # -----------------------------------------------------
+        # Step 1: Load recorded data from CSV file
+        # -----------------------------------------------------
+        df_records_from_file = pd.DataFrame()
+        if os.path.exists(record_file_path):
+            try:
+                # CSV HEADER: ['semantic_label', 'state_idx', 'frequency', 'phase_value']
+                df_records_from_file = pd.read_csv(record_file_path)
+                print(f"Successfully loaded {len(df_records_from_file)} records from {record_file_path}")
+
+                # Normalize column names to lowercase for robust column matching
+                df_records_from_file.columns = [c.lower() for c in df_records_from_file.columns]
+
+                if df_records_from_file.empty:
+                    print("Loaded file is empty. Skipping record visualization.")
+            except Exception as e:
+                print(f"Error reading or processing CSV file: {e}")
+                df_records_from_file = pd.DataFrame()  # Reset to empty DataFrame on error
+        else:
+            print(f"Warning: Record file not found at {record_file_path}. Proceeding without records.")
+
+        embeddings = self.embedding.weight.data.to(device)  # (n_e, e_dim)
+        n_e, e_dim = embeddings.shape
+
+        # 1. Generate sampled points on the phase circle
+        angles = torch.linspace(-np.pi, np.pi, n_angles, device=device)
+        angles = angles.unsqueeze(0).repeat(n_e, 1)
+        y0 = torch.cos(angles)
+        y1 = torch.sin(angles)
+        y = torch.stack((y0, y1), dim=-1)
+
+        # 2. Compute embedding space points for each phase value
+        d = e_dim // 2
+        state = embeddings.reshape(n_e, 1, d, 2)
+        y = y.unsqueeze(2)
+        points = torch.matmul(state, y.transpose(-1, -2))
+        points = points.squeeze(-1).reshape(n_e, n_angles, -1)
+
+        all_points = points.reshape(n_e * n_angles, -1).cpu().numpy()
+
+        # 3. Dimensionality Reduction
+        if method == 'pca':
+            reducer = PCA(n_components=2)
+            reduced = reducer.fit_transform(all_points)
+            title = "VQ Embeddings Phase Circle (PCA)"
+        elif method == 'tsne':
+            reducer = TSNE(n_components=2, perplexity=perplexity, init='pca', learning_rate='auto', random_state=42,
+                           n_jobs=-1)
+            reduced = reducer.fit_transform(all_points)
+            title = f"VQ Embeddings Phase Circle (t-SNE, perplexity={perplexity})"
+        else:
+            raise ValueError("method must be either 'pca' or 'tsne'")
+
+        reduced = reduced.reshape(n_e, n_angles, 2)
+
+        # 4. Prepare DataFrame for background trajectories
+        background_data = {
+            'Dim 1': reduced[:, :, 0].flatten(),
+            'Dim 2': reduced[:, :, 1].flatten(),
+            'Code Index': np.repeat(np.arange(n_e), n_angles)
+        }
+        df_bg = pd.DataFrame(background_data)
+
+        # -----------------------------------------------------
+        # Step 5: Map loaded records to reduced coordinates (df_records format)
+        # -----------------------------------------------------
+        df_records = pd.DataFrame()
+        if not df_records_from_file.empty:
+
+            # Map CSV columns to the DataFrame structure expected by plotting code
+            df_records = df_records_from_file.rename(columns={
+                'state_idx': 'Code Index',
+                'phase_value': 'Phase Value',
+                'semantic_label': 'Semantic Label'
+            })
+            # Ensure code index is integer type
+            df_records['Code Index'] = df_records['Code Index'].astype(int)
+
+            # Calculate reduced coordinates (Dim 1, Dim 2)
+            dim1_list = []
+            dim2_list = []
+
+            for index, row in df_records.iterrows():
+                code_idx = row['Code Index']
+                phase_val = row['Phase Value']
+
+                # Check if code_idx is within the valid range
+                if 0 <= code_idx < n_e:
+                    norm_phase = phase_val + 0.5
+                    angle_idx = int(norm_phase * (n_angles - 1))
+                    angle_idx = max(0, min(n_angles - 1, angle_idx))
+
+                    x, y_ = reduced[code_idx, angle_idx, :]
+                else:
+                    # Use NaN for out-of-range indices
+                    x, y_ = np.nan, np.nan
+
+                dim1_list.append(x)
+                dim2_list.append(y_)
+
+            df_records['Dim 1'] = dim1_list
+            df_records['Dim 2'] = dim2_list
+
+            # Drop any records where the index was invalid (resulted in NaN coordinates)
+            df_records.dropna(subset=['Dim 1', 'Dim 2'], inplace=True)
+            print(f"Processed {len(df_records)} valid records for plotting.")
+
+        # ----------- Plotly Interactive Plotting -----------
+
+        # Plot background trajectories (faint lines)
+        fig = px.line(df_bg, x='Dim 1', y='Dim 2', line_group='Code Index', title=title)
+        fig.update_traces(line=dict(color='gray', width=0.5), opacity=0.1, showlegend=False)
+
+        # Overlay record points (semantically colored scatter plot)
+        if not df_records.empty:
+            fig_scatter = px.scatter(df_records,
+                                     x='Dim 1',
+                                     y='Dim 2',
+                                     color='Semantic Label',
+                                     # Hover information setup
+                                     hover_data={'Code Index': True,
+                                                 'Phase Value': ':.4f',
+                                                 'Dim 1': ':.4f',
+                                                 'Dim 2': ':.4f',
+                                                 'Semantic Label': False
+                                                 },
+                                     opacity=0.8,
+                                     size=[1] * len(df_records),
+                                     size_max=4
+                                     )
+
+            for trace in fig_scatter.data:
+                # Plotly automatically adds traces with legend controls (click to toggle visibility)
+                fig.add_trace(trace)
+
+        # Update layout and axes for aesthetics and correct aspect ratio
+        fig.update_layout(
+            height=600,
+            width=800,
+            legend_title_text='Semantic Labels (Click to toggle)',
+            hovermode="closest",
+            plot_bgcolor='white',
+            xaxis=dict(showgrid=True, zeroline=True),
+            yaxis=dict(showgrid=True, zeroline=True, scaleanchor="x", scaleratio=1)
+        )
+
+        # Ensure legend markers for scatter points are dots, not lines
+        fig.for_each_trace(
+            lambda trace: trace.update(mode='markers') if trace.name in df_records['Semantic Label'].unique() else ())
+
+        # Display the Plotly chart
+        fig.show()
+
+        # --- Histogram Part (using Matplotlib) ---
+        if not df_records.empty:
+            # Call the helper function to plot histogram
+            self._plot_frequency_histogram(df_records, n_e)
+        else:
+            # Display an empty plot if no records were loaded
+            plt.figure(figsize=(8, 6))
+            plt.text(0.5, 0.5, "No Records Provided", ha='center', va='center')
+            plt.title("Code Usage Histogram")
+            plt.show()
+
+    def _plot_frequency_histogram(self, df_records, n_e):
+        # Count frequency of each code index
+        indices = df_records['Code Index'].tolist()
+        counts = Counter(indices)
+
+        # Prepare x (all code indices) and y (counts)
+        x_axis = range(n_e)
+        y_axis = [counts.get(i, 0) for i in x_axis]
+
+        # Plotting setup
+        plt.figure(figsize=(8, 6))
+        ax = plt.gca()
+
+        # Color bars: used codes in blue, unused in light gray
+        colors = ['steelblue' if c > 0 else 'lightgray' for c in y_axis]
+
+        ax.bar(x_axis, y_axis, color=colors, edgecolor='black', linewidth=0.5, alpha=0.8)
+
+        # Annotate Top 5 codes
+        if indices:
+            top_k = 5
+            most_common = counts.most_common(top_k)
+            info_text = "Top Used Codes:\n" + "\n".join([f"Idx {code}: {cnt}x" for code, cnt in most_common])
+
+            # Place text box in the top right
+            ax.text(0.95, 0.95, info_text,
+                    transform=ax.transAxes,
+                    fontsize=10, verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+
+        ax.set_title(f"Code Usage Histogram (Total: {len(indices)})")
+        ax.set_xlabel("Codebook Index")
+        ax.set_ylabel("Frequency")
+        ax.set_xlim(-1, n_e)
+
+        # Dynamic Y-limit
+        if len(indices) > 0:
+            ax.set_ylim(0, max(y_axis) * 1.15)
+
+        plt.tight_layout()
+        plt.show()
         import ipdb;
         ipdb.set_trace()
 

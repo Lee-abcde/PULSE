@@ -11,7 +11,8 @@ from phc.utils.flags import flags
 from learning.vq_pae_modules import *
 from functools import partial
 DISC_LOGIT_INIT_SCALE = 1.0
-
+import csv
+import os
 
 class AMPZBuilder(AMPBuilder):
 
@@ -100,6 +101,9 @@ class AMPZBuilder(AMPBuilder):
             #
             # self.master_embeddings = torch.stack(all_embeddings)
             # self.master_texts = all_texts
+            #
+            # self.RECORD_FILE = clip_pkl_path.parent / 'vq_pae_records.csv'
+            # self.initialize_record_file(self.RECORD_FILE)
             self.actor_mlp
 
         def load(self, params):
@@ -109,6 +113,32 @@ class AMPZBuilder(AMPBuilder):
             self._task_activation = params['task_mlp']['activation']
             self._task_initializer = params['task_mlp']['initializer']
             return
+
+        def initialize_record_file(self, file_path):
+            CSV_HEADER = ['semantic_label', 'state_idx', 'frequency', 'phase_value']
+            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                with open(file_path, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(CSV_HEADER)
+                print(f"Initialized new record file: {file_path}")
+            else:
+                print(f"Record file already exists: {file_path}")
+        def append_record(self, file_path, text, indexes, f, p):
+            try:
+                semantic_label = str(text) if text is not None else "Unknown"
+
+                state_idx = indexes.cpu().item() if indexes.ndim > 0 else indexes.cpu().item()
+
+                frequency = f.cpu().item()
+                phase_value = p.cpu().item()
+
+                row = [semantic_label, state_idx, frequency, phase_value]
+                with open(file_path, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(row)
+
+            except Exception as e:
+                print(f"Error writing record: {e}")
 
         def get_phase_manifold(self, state, angles):
             """
@@ -347,6 +377,8 @@ class AMPZBuilder(AMPBuilder):
                     # self.debug_index += 1
                 # if not flags.debug:
                 #     print(indexes, f, p)
+                #     print(text, indexes, f, p)
+                #     self.append_record(self.RECORD_FILE, text, indexes, f, p)
                 if flags.debug:
                     if flags.reset:
                         self.debug_phase_p = torch.full((1, 1), self.bottom_phase, device='cuda')
