@@ -1003,20 +1003,10 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
                 info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
 
-                # optionally, mask out discontinuous episodes
+                # ----------- AR1 连续性约束 for state -----------
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
-                not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
 
-                # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
-                time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
-                                            self.horizon_length, -1)
-                freq_diff = time_freqs[:, 1:] - time_freqs[:, :-1]
-                freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
-                freq_diff[not_consecs] = 0
-                freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
-                info_dict["kin_freq_smooth"] = freq_smooth_loss
-                # ----------- AR1 连续性约束 for state -----------
                 time_clip_wins = clip_embedding_window.view(self.minibatch_size // self.horizon_length,
                                                             self.horizon_length,
                                                             clip_embedding_window.shape[1],
@@ -1024,17 +1014,44 @@ class AMPAgent(common_agent.CommonAgent):
                 win_diff = time_clip_wins[:, 1:] - time_clip_wins[:, :-1]
                 win_diff_flat = win_diff.reshape(-1, win_diff.shape[-2] * win_diff.shape[-1])
                 is_same_semantic = torch.norm(win_diff_flat, dim=-1) < 1e-4
+                starter_mask = ((idxes <= self.window_size)[:, 1:] + (idxes <= self.window_size)[:, :-1]).view(-1)
+                ignore_smoothness = (~is_same_semantic) | starter_mask
+
                 pred_state = extra_dict['state_after_quant']
                 time_states = pred_state.view(self.minibatch_size // self.horizon_length,
                                               self.horizon_length, -1)
-                # difference between consecutive frames
                 state_diff = time_states[:, 1:] - time_states[:, :-1]
                 state_diff = state_diff.view(-1, state_diff.shape[-1])
-                state_diff[~is_same_semantic] = 0
-                # L2 penalty on difference (encourages temporal smoothness)
-                state_smooth_loss = torch.norm(state_diff, dim=-1).mean()
+                smooth_diff = state_diff.clone()
+                smooth_diff[ignore_smoothness] = 0
+                state_smooth_loss = torch.norm(smooth_diff, dim=-1).mean()
                 info_dict["kin_state_smooth"] = state_smooth_loss
+                # handling negative case
+                repulsion_mask = (~is_same_semantic) & (~starter_mask)
+                repulse_diff = state_diff[repulsion_mask]
+                if repulse_diff.shape[0] > 0:
+                    boundary_dist = torch.norm(repulse_diff, dim=-1)
+                    state_repulsion_loss = torch.exp(-boundary_dist).mean()
+                else:
+                    state_repulsion_loss = 0.0
+                info_dict["kin_state_repulsion"] = state_repulsion_loss
 
+                # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
+                time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
+                                            self.horizon_length, -1)
+                freq_diff = time_freqs[:, 1:] - time_freqs[:, :-1]
+                freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
+                smooth_freq_diff = freq_diff.clone()
+                smooth_freq_diff[ignore_smoothness] = 0
+                freq_smooth_loss = torch.norm(smooth_freq_diff, dim=-1).mean()
+                info_dict["kin_freq_smooth"] = freq_smooth_loss
+                freq_repulse_diff = freq_diff[repulsion_mask]
+                if freq_repulse_diff.shape[0] > 0:
+                    boundary_dist = torch.norm(freq_repulse_diff, dim=-1)
+                    freq_repulsion_loss = torch.exp(-boundary_dist).mean()
+                else:
+                    freq_repulsion_loss = 0.0
+                info_dict["kin_freq_repulsion"] = freq_repulsion_loss
                 # # ----------- 正则项 -----------
                 z_q = extra_dict['quantized_z_out']
                 z_b = extra_dict['z_before_quant']
@@ -1054,7 +1071,9 @@ class AMPAgent(common_agent.CommonAgent):
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
+                        + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
+                        + freq_repulsion_loss * getattr(humanoid_env, "frequency_repulsion_coeff", 0.01)
                         + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
                         + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
