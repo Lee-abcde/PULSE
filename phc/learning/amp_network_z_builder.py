@@ -336,7 +336,9 @@ class AMPZBuilder(AMPBuilder):
                 task_out_proj = project_to_norm(task_out_z, norm=self.embedding_norm, z_type=self.z_type)
             elif self.z_type == "vq_pae":
                 x = task_out_z.transpose(1, 2)  # (B, D, W)
-                latent = self.z_encoder(x)
+                text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
+                x_withText = torch.cat([x, text_feat], dim=1)
+                latent = self.z_encoder(x_withText)
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
 
@@ -360,11 +362,7 @@ class AMPZBuilder(AMPBuilder):
                 # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
                 # print("Predicted text:", text)
                 ###############################################
-
-
-                text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
-                fusion_latent = torch.cat([latent, text_feat], dim=1)
-                state_input = fusion_latent.mean(axis=-1)
+                state_input = latent.mean(axis=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -826,12 +824,12 @@ class AMPZBuilder(AMPBuilder):
                 init_mlp(self.z_prior_mu, mlp_init)
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
-                self.n_input_channels = self_obs_size + task_obs_size
+                self.clip_dim = getattr(self, 'clip_dim', 512)
+                self.n_input_channels = self_obs_size + task_obs_size + self.clip_dim
                 self.n_latent_channels = self.embedding_size
                 self.window = getattr(self, 'window', 0.23)
                 self.time_range = self.window_size
                 self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
-                self.clip_dim = getattr(self, 'clip_dim', 512)
 
                 self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
                 self.pae_n_layers = getattr(self, 'pae_n_layers', 2)
@@ -872,7 +870,7 @@ class AMPZBuilder(AMPBuilder):
                 self.text_adapter = nn.Sequential(
                     nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
                 )
-                n_channels_state_mlp = [self.n_latent_channels + self.clip_dim] + [self.num_embed] * n_layers_state
+                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
                 self.state_proj_head = nn.Linear(self.num_embed, 512)
                 # ---- 5. Vector Quantizer ----
