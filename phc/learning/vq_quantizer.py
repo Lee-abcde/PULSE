@@ -420,6 +420,14 @@ class VectorQuantizer(nn.Module):
         for i in range(n_e):
             ax1.plot(reduced[i, :, 0], reduced[i, :, 1], alpha=0.1, color='gray', linewidth=0.5)
 
+        if not records:
+            # If no records, draw each trajectory with a unique color for clarity
+            cmap = plt.cm.get_cmap('hsv', n_e)  # Using 'hsv' for maximal color range
+            for i in range(n_e):
+                # Draw the trajectory with a color determined by its index
+                ax1.plot(reduced[i, :, 0], reduced[i, :, 1], color=cmap(i), linewidth=1.0, alpha=0.7)
+            ax1.set_title(f"VQ Phase Trajectories \n(Colored lines = individual codes)")
+
         if records:
             # Highlight specific records and connect them with lines
             record_points = []
