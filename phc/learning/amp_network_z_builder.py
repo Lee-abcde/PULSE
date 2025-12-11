@@ -362,7 +362,8 @@ class AMPZBuilder(AMPBuilder):
                 # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
                 # print("Predicted text:", text)
                 ###############################################
-                state_input = latent.mean(axis=-1)
+                fusion_latent = torch.cat([latent, text_feat], dim=1)
+                state_input = fusion_latent.mean(axis=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -503,7 +504,8 @@ class AMPZBuilder(AMPBuilder):
 
             prior_latent = self.prior_z_encoder(self_obs)
 
-            state_input = prior_latent.mean(axis=-1)
+            fusion_latent = torch.cat([prior_latent, text_feat], dim=1)
+            state_input = fusion_latent.mean(axis=-1)
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
@@ -870,7 +872,7 @@ class AMPZBuilder(AMPBuilder):
                 self.text_adapter = nn.Sequential(
                     nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
                 )
-                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
+                n_channels_state_mlp = [self.n_latent_channels + self.clip_dim] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
                 self.state_proj_head = nn.Linear(self.num_embed, 512)
                 # ---- 5. Vector Quantizer ----
@@ -903,7 +905,7 @@ class AMPZBuilder(AMPBuilder):
                     nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
                 prior_state_input_dim = self.n_latent_channels
-                n_channels_prior_state_mlp = [prior_state_input_dim] + [self.num_embed] * n_layers_state
+                n_channels_prior_state_mlp = [prior_state_input_dim + self.clip_dim] + [self.num_embed] * n_layers_state
                 self.prior_state_fc = MLPChannels(n_channels_prior_state_mlp, bn=False)
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
