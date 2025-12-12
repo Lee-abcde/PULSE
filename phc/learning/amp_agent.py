@@ -1037,21 +1037,14 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_state_repulsion"] = state_repulsion_loss
 
                 # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
+                not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
                 time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
                                             self.horizon_length, -1)
                 freq_diff = time_freqs[:, 1:] - time_freqs[:, :-1]
                 freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
-                smooth_freq_diff = freq_diff.clone()
-                smooth_freq_diff[ignore_smoothness] = 0
-                freq_smooth_loss = torch.norm(smooth_freq_diff, dim=-1).mean()
+                freq_diff[not_consecs] = 0
+                freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
                 info_dict["kin_freq_smooth"] = freq_smooth_loss
-                freq_repulse_diff = freq_diff[repulsion_mask]
-                if freq_repulse_diff.shape[0] > 0:
-                    boundary_dist = torch.norm(freq_repulse_diff, dim=-1)
-                    freq_repulsion_loss = torch.exp(-boundary_dist).mean()
-                else:
-                    freq_repulsion_loss = 0.0
-                info_dict["kin_freq_repulsion"] = freq_repulsion_loss
                 # # ----------- 正则项 -----------
                 z_q = extra_dict['quantized_z_out']
                 z_b = extra_dict['z_before_quant']
@@ -1073,7 +1066,6 @@ class AMPAgent(common_agent.CommonAgent):
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
                         + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
-                        + freq_repulsion_loss * getattr(humanoid_env, "frequency_repulsion_coeff", 0.01)
                         + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
                         + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
