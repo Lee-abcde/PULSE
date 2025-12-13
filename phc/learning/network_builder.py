@@ -241,9 +241,13 @@ class A2CBuilder(NetworkBuilder):
                     self.rnn = self._build_rnn(self.rnn_name, rnn_in_size, self.rnn_units, self.rnn_layers)
                     if self.rnn_ln:
                         self.layer_norm = torch.nn.LayerNorm(self.rnn_units)
-
+            self.clip_embedding_size = 512
             mlp_args = {'input_size': in_mlp_shape, 'units': self.units, 'activation': self.activation, 'norm_func_name': self.normalization, 'dense_func': torch.nn.Linear, 'd2rl': self.is_d2rl, 'norm_only_first_layer': self.norm_only_first_layer}
-            self.actor_mlp = self._build_mlp(**mlp_args)
+            actor_mlp_args = {'input_size': in_mlp_shape + self.clip_embedding_size, 'units': self.units,
+                        'activation': self.activation, 'norm_func_name': self.normalization,
+                        'dense_func': torch.nn.Linear, 'd2rl': self.is_d2rl,
+                        'norm_only_first_layer': self.norm_only_first_layer}
+            self.actor_mlp = self._build_mlp(**actor_mlp_args)
             if self.separate:
                 self.critic_mlp = self._build_mlp(**mlp_args)
 
