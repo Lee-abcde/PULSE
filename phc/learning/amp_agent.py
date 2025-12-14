@@ -964,20 +964,20 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_input = extra_dict['frequency'].detach()
                 target_state = extra_dict['state_after_quant'].detach()
                 target_manifold = extra_dict['full_quantized_z_out'].detach()
-                prior_mu, prior_state, prior_proj_emb, prior_vq_loss = self.model.a2c_network.compute_vqpae_prior(
+                prior_mu, prior_info = self.model.a2c_network.compute_vqpae_prior(
                     batch_dict,
                     clip_embedding_window,  # Detached
                     freq_input  # Detached
                 )
-                info_dict["kin_prior_vq_loss"] = prior_vq_loss
-                loss_prior_state = (prior_state - target_state).pow(2).mean()
+                info_dict["kin_prior_vq_loss"] = prior_info['vq_loss']
+                loss_prior_state = (prior_info['state'] - target_state).pow(2).mean()
                 info_dict["kin_prior_state_loss"] = loss_prior_state
 
                 mse_per_sample = (prior_mu - target_manifold).pow(2).mean(dim=1)
                 prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
                 info_dict["kin_prior_loss"] = prior_loss
 
-                prior_state_norm = torch.nn.functional.normalize(prior_proj_emb, p=2, dim=1)
+                prior_state_norm = torch.nn.functional.normalize(prior_info['prior_projected_embedding'], p=2, dim=1)
                 clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding_window'].mean(dim=1), p=2, dim=1)
                 loss_prior_semantic = 1.0 - (prior_state_norm * clip_norm).sum(dim=1).mean()
                 info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
@@ -1070,7 +1070,7 @@ class AMPAgent(common_agent.CommonAgent):
                         + regu_prior * 0.005
                         + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
                         # ---------------- Prior Loss ----------------
-                        + prior_vq_loss * getattr(humanoid_env, "prior_vq_coeff", 0.5)
+                        + prior_info['vq_loss'] * getattr(humanoid_env, "prior_vq_coeff", 0.5)
                         + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
                         + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
                         + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)

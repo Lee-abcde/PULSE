@@ -440,9 +440,10 @@ class AMPZBuilder(AMPBuilder):
                     #         embedding = torch.tensor(embedding, dtype=torch.float32)
                     #
                     #     return embedding
-                    # clip_embedding = get_clip_embedding("run", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
-                    # prior_mu, _, _, _ = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
-                    # return prior_mu, None
+                    # clip_embedding = get_clip_embedding("walk", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
+                    # prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
+                    # extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat']}
+                    # return prior_mu, extra_dict
 
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
@@ -518,7 +519,12 @@ class AMPZBuilder(AMPBuilder):
 
             prior_manifold, _ = self.get_phase_manifold(state, angles)
             prior_projected_embedding = self.state_proj_head(state)
-            return prior_manifold, state, prior_projected_embedding, loss
+            return prior_manifold, {
+                "state": state,
+                "prior_projected_embedding": prior_projected_embedding,
+                "vq_loss": loss,
+                "prior_adapted_text_feat": text_feat,
+            }
 
         def reparameterize(self, mu, logvar):
             std = torch.exp(0.5*logvar)
