@@ -506,8 +506,7 @@ class AMPZBuilder(AMPBuilder):
 
             prior_latent = self.prior_z_encoder(self_obs)
 
-            fusion_latent = torch.cat([prior_latent, text_feat], dim=1)
-            state_input = fusion_latent.mean(axis=-1)
+            state_input = prior_latent.mean(axis=-1)
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
@@ -912,7 +911,7 @@ class AMPZBuilder(AMPBuilder):
                     nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
                 prior_state_input_dim = self.n_latent_channels
-                n_channels_prior_state_mlp = [prior_state_input_dim + self.clip_dim] + [self.num_embed] * n_layers_state
+                n_channels_prior_state_mlp = [prior_state_input_dim] + [self.num_embed] * n_layers_state
                 self.prior_state_fc = MLPChannels(n_channels_prior_state_mlp, bn=False)
             elif self.z_type == 'vq_vae_hybrid':
                 self.z_quant = nn.Linear(in_features=self.embedding_size * 5, out_features=int(self.embedding_size - 1))
