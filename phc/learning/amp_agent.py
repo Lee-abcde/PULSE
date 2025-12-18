@@ -933,12 +933,7 @@ class AMPAgent(common_agent.CommonAgent):
                         eff_len = effective_mask[i].sum().int().item()
                         gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
 
-                    alpha = 3.0  # 控制指数增长速度，越大越陡
-                    time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
-                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # 减 1 保证最小权重 > 0
-                    time_weights = time_weights / time_weights.max()  # 归一化到 [0,1]
-                    time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
-                    weighted_mask = effective_mask.detach() * time_weights
+                    weighted_mask = effective_mask.detach()
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
                     T_total = effective_mask.shape[1]
