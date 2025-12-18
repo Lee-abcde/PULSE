@@ -54,6 +54,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             self.print_stats = False
         
         # joblib.dump({"mlp": self.model.a2c_network.actor_mlp, "mu": self.model.a2c_network.mu}, "single_model.pkl") # ZL: for saving part of the model.
+        self.second_test_chance=True
         return
 
     def _post_step(self, info, done):
@@ -320,6 +321,13 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                                 print("reward:", cur_rewards / done_count, "steps:", cur_steps / done_count, "w:", game_res,)
                             else:
                                 print("reward:", cur_rewards / done_count, "steps:", cur_steps / done_count,)
+                                # only for collect visualization data
+                                # if self.second_test_chance:
+                                #     self.second_test_chance=False
+                                #     pass
+                                # else:
+                                #     self.env.task.resample_motions()
+                                #     self.second_test_chance=True
 
                         sum_game_res += game_res
                         # if batch_size//self.num_agents == 1 or games_played >= n_games:

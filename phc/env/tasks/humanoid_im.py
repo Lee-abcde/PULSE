@@ -1127,6 +1127,9 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         if self.cycle_motion:
             pass_time = pass_time_max
             if pass_time_motion_len.sum() > 0:
+                # only for collect visualization data
+                # self.resample_motions()
+                # return
                 self._motion_start_times_offset[pass_time_motion_len] = -self.progress_buf[pass_time_motion_len] * self.dt  # such that the proegress_buf will cancel out to 0.
                 self._motion_start_times[pass_time_motion_len] = self._sample_time(self._sampled_motion_ids[pass_time_motion_len])
                 self._cycle_counter[pass_time_motion_len] = 60
