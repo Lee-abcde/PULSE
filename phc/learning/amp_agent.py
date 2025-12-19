@@ -1066,7 +1066,7 @@ class AMPAgent(common_agent.CommonAgent):
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
                         + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
-                        + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
+                        # + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
                         + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
                         # ---------------- Prior Loss ----------------
