@@ -23,6 +23,7 @@ from phc.utils.flags import flags
 from enum import Enum
 USE_CACHE = False
 print("MOVING MOTION DATA TO GPU, USING CACHE:", USE_CACHE)
+import json, pickle
 
 
 class FixHeightMode(Enum):
@@ -118,7 +119,60 @@ class MotionLibBase():
         self._device = self.m_cfg.device
         
         self.mesh_parsers = None
-        
+
+        self.babel_ann = {}
+        self.babel_lookup = {}
+        self.babel_id_lookup = {}
+        self.clip_embedding_dict = {}
+        base_dir = os.path.dirname(self.m_cfg.motion_file)
+        babel_dir = os.path.join(base_dir, "babel_v1.0_release")
+        clip_pkl_path = os.path.join(base_dir, "text_embedding_dict_clip.pkl")
+        # load text to embedding pkl file
+        if os.path.exists(clip_pkl_path):
+            print(f"Loading CLIP embeddings from: {clip_pkl_path} ...")
+            with open(clip_pkl_path, 'rb') as f:
+                self.clip_embedding_dict = joblib.load(f)
+        else:
+            print(f"Warning: CLIP embedding file NOT found at {clip_pkl_path}")
+            import ipdb;
+            ipdb.set_trace()
+        # load babel labels file
+        files = ["train.json", "val.json"]
+        if os.path.exists(babel_dir):
+            print(f"Loading BABEL from {babel_dir}...")
+            for fname in files:
+                fpath = os.path.join(babel_dir, fname)
+                if os.path.exists(fpath):
+                    with open(fpath, 'r') as f:
+                        self.babel_ann.update(json.load(f))
+
+            print("Building BABEL lookup table...")
+            for sid, data in self.babel_ann.items():
+                feat_p = data.get('feat_p', '')
+                if not feat_p:
+                    import ipdb;
+                    ipdb.set_trace()
+
+                path_no_ext = os.path.splitext(feat_p)[0]
+                key_variant_a = path_no_ext.replace('/', '_')
+
+                parts = path_no_ext.split('/')
+                if len(parts) > 1 and parts[0] == parts[1]:
+                    key_variant_b = "_".join(parts[1:])
+                else:
+                    key_variant_b = key_variant_a
+
+                frame_ann = data.get('frame_ann', {})
+                if frame_ann is None:
+                    frame_ann = data.get('seq_ann', {})
+                labels = frame_ann.get('labels', [])
+                self.babel_lookup[key_variant_b] = labels
+                self.babel_id_lookup[key_variant_b] = data.get('babel_sid', '')
+            print(f"BABEL lookup table built with {len(self.babel_lookup)} keys.")
+        else:
+            print("Warning: BABEL directory not found!")
+            import ipdb;
+            ipdb.set_trace()
         self.load_data(self.m_cfg.motion_file,  min_length = self.m_cfg.min_length, im_eval = self.m_cfg.im_eval)
         self.setup_constants(fix_height = self.m_cfg.fix_height,  multi_thread = self.m_cfg.multi_thread)
 
@@ -133,10 +187,95 @@ class MotionLibBase():
         else:
             self.mode = MotionlibMode.directory
             self._motion_data_load = glob.glob(osp.join(motion_file, "*.pkl"))
-        
-        data_list = self._motion_data_load
+
+        filtered_data = {}
+        raw_data = self._motion_data_load if self.mode == MotionlibMode.file else {}
 
         if self.mode == MotionlibMode.file:
+            print(f"Filtering data... (Total raw: {len(raw_data)})")
+            for k, v in tqdm(raw_data.items()):
+                if len(self.babel_lookup) > 0:
+                    clean_key = k.split('-', 1)[1] if '-' in k else k
+
+                    if clean_key in self.babel_lookup:
+                        num_frames = len(v['pose_quat_global'])
+                        fps = v['fps']
+                        curr_len = len(v['pose_quat_global']) / fps
+                        found_id = self.babel_id_lookup[clean_key]
+                        duration = self.babel_ann[str(found_id)]['dur']
+                        if abs(duration - curr_len) > 1e-2:
+                            print("Found the wrong motion! the duration is not match")
+                            import ipdb;
+                            ipdb.set_trace()
+
+                        curr_text_dense = ["transition"] * num_frames
+                        found_segments = self.babel_lookup[clean_key]
+                        if found_segments:
+                            for seg in found_segments:
+                                label = seg.get('proc_label') or seg.get('raw_label') or seg.get('act_cat')
+                                if label is None:
+                                    print("Couldn't find the label")
+                                    import ipdb;
+                                    ipdb.set_trace()
+
+                                if 'start_t' in seg and 'end_t' in seg:
+                                    start_f = int(seg['start_t'] * fps)
+                                    end_f = int(seg['end_t'] * fps)
+
+                                    start_f = max(0, start_f)
+                                    end_f = min(num_frames, end_f)
+
+                                    for i in range(start_f, end_f):
+                                        curr_text_dense[i] = label
+                                else:
+                                    # print("process segment level label")
+                                    curr_text_dense = [label] * num_frames
+                                    # import ipdb; ipdb.set_trace()
+                        # post process transition label
+                        last_meaningful_action = None
+                        for i in range(num_frames):
+                            if curr_text_dense[i] != "transition":
+                                last_meaningful_action = curr_text_dense[i]
+                                break
+
+                        if last_meaningful_action is None:
+                            import ipdb;
+                            ipdb.set_trace()  # robust check
+
+                        for i in range(num_frames - 1, -1, -1):
+                            current_label = curr_text_dense[i]
+
+                            if current_label == "transition":
+                                new_label = f"transition to {last_meaningful_action}"
+                                curr_text_dense[i] = new_label
+                            else:
+                                last_meaningful_action = current_label
+                        v['babel_text_labels'] = curr_text_dense
+
+                        frame_embeddings = []
+                        for lbl in curr_text_dense:
+                            # Use the helper function to get the tensor
+                            if lbl == 'transition to move head in a circle':
+                                import ipdb;
+                                ipdb.set_trace()
+                            emb = self.get_clip_embedding(lbl)
+                            frame_embeddings.append(emb)
+
+                        if len(frame_embeddings) > 0:
+                            clip_tensor = torch.stack(frame_embeddings)
+                            v['clip_embeddings'] = clip_tensor.cpu()
+                        else:
+                            print("Couldn't find the frame embedding")
+                            import ipdb;
+                            ipdb.set_trace()
+                    else:
+                        # print("do not have matched babel data!", clean_key)
+                        continue
+
+                filtered_data[k] = v
+            self._motion_data_load = filtered_data
+            print(f"Motions remaining after BABEL filter: {len(self._motion_data_load)}")
+
             if min_length != -1:
                 data_list = {k: v for k, v in list(self._motion_data_load.items()) if len(v['pose_quat_global']) >= min_length}
             elif im_eval:
@@ -181,6 +320,8 @@ class MotionLibBase():
         if "gts" in self.__dict__:
             del self.gts, self.grs, self.lrs, self.grvs, self.gravs, self.gavs, self.gvs, self.dvs,
             del self._motion_lengths, self._motion_fps, self._motion_dt, self._motion_num_frames, self._motion_bodies, self._motion_aa
+            if hasattr(self, '_motion_clip_embeddings'):
+                del self._motion_clip_embeddings
             if flags.real_traj:
                 del self.q_gts, self.q_grs, self.q_gavs, self.q_gvs
 
@@ -191,6 +332,7 @@ class MotionLibBase():
         self._motion_num_frames = []
         self._motion_bodies = []
         self._motion_aa = []
+        self._motion_clip_embeddings = []
         
         if flags.real_traj:
             self.q_gts, self.q_grs, self.q_gavs, self.q_gvs = [], [], [], []
@@ -277,6 +419,12 @@ class MotionLibBase():
                 self._motion_aa.append(np.zeros((num_frames, self.num_joints * 3)))
                 self._motion_bodies.append(torch.zeros(17))
 
+            if 'clip_embeddings' in motion_file_data:
+                self._motion_clip_embeddings.append(motion_file_data['clip_embeddings'])
+            else:
+                print("Could not find clip_embeddings!")
+                import ipdb; ipdb.set_trace()
+
             self._motion_fps.append(motion_fps)
             self._motion_dt.append(curr_dt)
             self._motion_num_frames.append(num_frames)
@@ -300,6 +448,7 @@ class MotionLibBase():
         self._motion_num_frames = torch.tensor(self._motion_num_frames, device=self._device)
         self._motion_limb_weights = torch.tensor(np.array(limb_weights), device=self._device, dtype=torch.float32)
         self._num_motions = len(motions)
+        self.clip_embeddings = torch.cat(self._motion_clip_embeddings, dim=0).to(self._device)
 
         self.gts = torch.cat([m.global_translation for m in motions], dim=0).float().to(self._device)
         self.grs = torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
@@ -335,6 +484,34 @@ class MotionLibBase():
     def get_total_length(self):
         return sum(self._motion_lengths)
 
+    def get_clip_embedding(self, key: str) -> torch.Tensor:
+        """
+        Retrieves the corresponding CLIP embedding tensor for a given text key.
+
+        If the key is found, the value is converted to a PyTorch Tensor and moved to the correct device.
+        If the key is not found, a zero vector of the correct dimensionality is returned as a fallback.
+
+        Args:
+            key (str): The text label (e.g., 'walk', 'jump') used to look up the embedding.
+
+        Returns:
+            torch.Tensor: The embedding vector (e.g., shape [512]) on self._device.
+        """
+        # if key == 'transition to move head in a circle':
+        #     key = 'transition to move head around'
+        embedding = self.clip_embedding_dict.get(key)
+
+        if embedding is None:
+            print("key not found")
+            import ipdb;
+            ipdb.set_trace()
+
+        if isinstance(embedding, np.ndarray):
+            embedding = torch.from_numpy(embedding).float()
+        elif isinstance(embedding, (list, tuple)):
+            embedding = torch.tensor(embedding, dtype=torch.float32)
+
+        return embedding
     # def update_sampling_weight(self):
     #     ## sampling weight based on success rate. 
     #     # sampling_temp = 0.2
@@ -466,6 +643,7 @@ class MotionLibBase():
         dof_vel0 = self.dvs[f0l]
         dof_vel1 = self.dvs[f1l]
 
+        clip_emb = self.clip_embeddings[f0l]
         vals = [local_rot0, local_rot1, body_vel0, body_vel1, body_ang_vel0, body_ang_vel1, rg_pos0, rg_pos1, dof_vel0, dof_vel1]
         for v in vals:
             assert v.dtype != torch.float64
@@ -521,6 +699,7 @@ class MotionLibBase():
             "body_ang_vel": body_ang_vel,
             "motion_bodies": self._motion_bodies[motion_ids],
             "motion_limb_weights": self._motion_limb_weights[motion_ids],
+            "clip_embedding": clip_emb.clone()  # 使用 clone() 以防外部修改影响原始数据
         }
 
     def get_root_pos_smpl(self, motion_ids, motion_times):
