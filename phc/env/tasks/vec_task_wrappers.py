@@ -53,7 +53,8 @@ class VecTaskPythonWrapper(VecTaskPython):
 
     def reset(self, env_ids=None):
         self.task.reset(env_ids)
-        return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device), \
+        torch.clamp(self.task.clip_embedding_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
     @property
     def amp_observation_space(self):

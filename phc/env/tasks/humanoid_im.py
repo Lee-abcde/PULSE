@@ -683,7 +683,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         self.self_obs_buf[env_ids] = self_obs
 
         if (self._enable_task_obs):
-            task_obs = self._compute_task_obs(env_ids)
+            task_obs, task_clip_embedding = self._compute_task_obs(env_ids)
             obs = torch.cat([self_obs, task_obs], dim=-1)
         else:
             obs = self_obs
@@ -703,7 +703,8 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
             self.obs_buf[env_ids] = obs_slice
         else:
             self.obs_buf[env_ids] = obs
-        return obs
+            self.clip_embedding_buf[env_ids] = task_clip_embedding
+        return obs, task_clip_embedding
 
     def _compute_task_obs(self, env_ids=None, save_buffer = True):
         if (env_ids is None):
@@ -736,6 +737,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         ref_root_pos, ref_root_rot, ref_dof_pos, ref_root_vel, ref_root_ang_vel, ref_dof_vel, ref_smpl_params, ref_limb_weights, ref_pose_aa, ref_rb_pos, ref_rb_rot, ref_body_vel, ref_body_ang_vel = \
                 motion_res["root_pos"], motion_res["root_rot"], motion_res["dof_pos"], motion_res["root_vel"], motion_res["root_ang_vel"], motion_res["dof_vel"], \
                 motion_res["motion_bodies"], motion_res["motion_limb_weights"], motion_res["motion_aa"], motion_res["rg_pos"], motion_res["rb_rot"], motion_res["body_vel"], motion_res["body_ang_vel"]
+        ref_clip_embedding = motion_res["clip_embedding"]
         root_pos = body_pos[..., 0, :]
         root_rot = body_rot[..., 0, :]
 
@@ -848,7 +850,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
                 self.ref_dof_pos[env_ids] = ref_dof_pos
         
         
-        return obs
+        return obs, ref_clip_embedding
 
     def _compute_reward(self, actions):
         body_pos = self._rigid_body_pos

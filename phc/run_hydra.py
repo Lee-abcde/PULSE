@@ -211,12 +211,12 @@ class RLGPUEnv(vecenv.IVecEnv):
             return self.full_state["obs"], reward, is_done, info
 
     def reset(self, env_ids=None):
-        self.full_state["obs"] = self.env.reset(env_ids)
+        self.full_state["obs"], self.full_state["clip_embedding"] = self.env.reset(env_ids)
         if self.use_global_obs:
             self.full_state["states"] = self.env.get_state()
             return self.full_state
         else:
-            return self.full_state["obs"]
+            return self.full_state["obs"], self.full_state["clip_embedding"]
 
     def get_number_of_agents(self):
         return self.env.get_number_of_agents()

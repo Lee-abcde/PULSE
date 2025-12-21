@@ -52,6 +52,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
             "prev_actions": None,
             "obs": obs,
             "rnn_states": self.states,
+            'clip_embedding': obs_dict["clip_embedding"]
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)
@@ -185,7 +186,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
         self.has_batch_dimension = True
 
         need_init_rnn = self.is_rnn
-        obs_dict = self.env_reset()
+        obs_dict, clip_embedding = self.env_reset()
         batch_size = humanoid_env.num_envs
 
         if need_init_rnn:
@@ -199,9 +200,10 @@ class IMAmpAgent(amp_agent.AMPAgent):
 
         with torch.no_grad():
             while True:
-                obs_dict = self.env_reset(done_indices)
+                obs_dict, clip_embedding = self.env_reset(done_indices)
 
-                action = self.get_action(obs_dict, is_determenistic=True)
+                action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding} \
+                                         , is_determenistic=True)
                 obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action)
                 cr += r
                 steps += 1
