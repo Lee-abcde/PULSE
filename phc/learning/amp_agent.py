@@ -349,14 +349,15 @@ class AMPAgent(common_agent.CommonAgent):
         reward_raw = torch.zeros(1, device=self.device)
         for n in range(self.horizon_length):
 
-            self.obs = self.env_reset(done_indices)
+            self.obs, self.clip_embedding = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
+            self.experience_buffer.update_data('clip_embedding', n, self.clip_embedding)
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
                 res_dict = self.get_masked_action_values(self.obs, masks)
             else:
-                res_dict = self.get_action_values(self.obs)
+                res_dict = self.get_action_values({'obs':self.obs['obs'], 'clip_embedding': self.clip_embedding})
                 
             for k in update_list:
                 self.experience_buffer.update_data(k, n, res_dict[k])
@@ -445,6 +446,7 @@ class AMPAgent(common_agent.CommonAgent):
         dataset_dict['amp_obs'] = batch_dict['amp_obs']
         dataset_dict['amp_obs_demo'] = batch_dict['amp_obs_demo']
         dataset_dict['amp_obs_replay'] = batch_dict['amp_obs_replay']
+        dataset_dict['clip_embedding'] = batch_dict['clip_embedding']
 
         if self.save_kin_info:
             dataset_dict['kin_dict'] = batch_dict['kin_dict']
@@ -640,6 +642,7 @@ class AMPAgent(common_agent.CommonAgent):
             batch_dict['obs_orig'] = obs_batch
             batch_dict['obs'] = input_dict['obs_processed']
             batch_dict['kin_dict'] = input_dict['kin_dict']
+            batch_dict['clip_embedding'] = input_dict['clip_embedding']
             
             # if humanoid_env.z_type == "vae":
             #     batch_dict['z_noise'] = input_dict['z_noise']
@@ -871,11 +874,17 @@ class AMPAgent(common_agent.CommonAgent):
                 z_b = extra_dict['z_before_quant']
                 regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
                 info_dict["kin_prior_regu"] = regu_prior
-
+                # ----------- (Semantic Alignment Loss) -----------
+                projected_clip_embedding = extra_dict['projected_clip_embedding']
+                state_norm = torch.nn.functional.normalize(projected_clip_embedding, p=2, dim=1)
+                clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding'], p=2, dim=1)
+                semantic_loss = 1.0 - (state_norm * clip_norm).sum(dim=1).mean()
+                info_dict["kin_semantic"] = semantic_loss
                 # ----------- 总损失函数 -----------
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 0.01)
+                        + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.01)
                         + prior_mse_loss * prior_coefficient
                         + ar1_prior * humanoid_env.ar1_coefficient
                         + regu_prior * 0.005

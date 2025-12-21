@@ -188,8 +188,8 @@ class AMPZBuilder(AMPBuilder):
                         import ipdb; ipdb.set_trace()
                         flags.trigger_input = False
                         print('...')
-                
-                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": z_before_quant, "quantized_z_out": task_out_proj}
+                projected_clip_embedding = self.state_proj_head(task_out_proj)
+                extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": z_before_quant, "quantized_z_out": task_out_proj, 'projected_clip_embedding': projected_clip_embedding}
             elif self.z_type == 'vq_vae_hybrid':
                 z_before_quant = self.z_quant(task_out_z)
                 z_var = self.z_var(task_out_z)
@@ -247,7 +247,10 @@ class AMPZBuilder(AMPBuilder):
             obs = obs_dict['obs']
             self_obs = obs[:, :self.self_obs_size]
 
-            prior_latent = self.z_prior(self_obs)
+            text_feat = self.text_adapter(obs_dict['clip_embedding'])
+            self_obs_withText = torch.cat([self_obs, text_feat], dim=1)
+
+            prior_latent = self.z_prior(self_obs_withText)
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
            
@@ -437,8 +440,9 @@ class AMPZBuilder(AMPBuilder):
                 #     task_out_z = torch.cat([task_out_z, self_out_z], dim=-1)
                 # else:
                 #     task_out_z = self.z_mlp(obs)
-                
-                task_out_z = self.z_mlp(obs)
+                text_feat = self.text_adapter(obs_dict['clip_embedding'])
+                obs_withText = torch.cat([obs, text_feat], dim=1)
+                task_out_z = self.z_mlp(obs_withText)
                 
                 if self.proj_norm:
                     z_out, extra_dict = self.form_embedding(task_out_z, obs_dict)
@@ -452,7 +456,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    actor_input = torch.cat([self_obs, z_out], dim=-1)
+                    actor_input = torch.cat([self_obs, z_out, text_feat], dim=-1)
 
                 a_out = self.actor_mlp(actor_input)
                 
@@ -492,8 +496,8 @@ class AMPZBuilder(AMPBuilder):
             #     mlp_input_shape = task_obs_size
             # else:
             #     mlp_input_shape = self_obs_size + task_obs_size  # target
-            
-            mlp_input_shape = self_obs_size + task_obs_size  # target
+            self.clip_dim = getattr(self, 'clip_dim', 512)
+            mlp_input_shape = self_obs_size + task_obs_size + self.clip_dim # target
 
             mlp_args = {'input_size': mlp_input_shape, 'units': self._task_units, 'activation': self._task_activation, 'dense_func': torch.nn.Linear}
             self.z_mlp = self._build_mlp(**mlp_args)
@@ -545,13 +549,18 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == 'vq_vae':
                 self.quantizer = Quantizer(self.dict_size, self.embedding_size//self.embedding_partion, 0.25)
                 # self.quantizer = EMAVectorQuantizer(self.dict_size, self.embedding_size//4, 0.25, decay = 0.99)
-                mlp_args = {'input_size': self_obs_size, 'units': self._task_units, 'activation': self._task_activation,
+                self.num_embed = 32
+                mlp_args = {'input_size': self_obs_size+self.clip_dim, 'units': self._task_units, 'activation': self._task_activation,
                             'dense_func': torch.nn.Linear}
                 self.z_prior = self._build_mlp(**mlp_args)
                 self.z_prior_mu = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)
                 # self.z_prior_logvar = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)
                 init_mlp(self.z_prior, mlp_init)
                 init_mlp(self.z_prior_mu, mlp_init)
+                self.state_proj_head = nn.Linear(self.num_embed, 512)
+                self.text_adapter = nn.Sequential(
+                    nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
+                )
                 # init_mlp(self.z_prior_logvar, mlp_init)
                 
             elif self.z_type == 'vq_vae_hybrid':
