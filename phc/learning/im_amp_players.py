@@ -228,7 +228,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
         for t in range(n_games):
             if games_played >= n_games:
                 break
-            obs_dict = self.env_reset()
+            obs_dict, clip_embedding = self.env_reset()
 
             batch_size = 1
             batch_size = self.get_batch_size(obs_dict["obs"], batch_size)
@@ -246,7 +246,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
 
             with torch.no_grad():
                 for n in range(self.max_steps):
-                    obs_dict = self.env_reset(done_indices)
+                    obs_dict, clip_embedding = self.env_reset(done_indices)
 
 
                     if COLLECT_Z: z = self.get_z(obs_dict)
@@ -256,7 +256,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         masks = self.env.get_action_mask()
                         action = self.get_masked_action(obs_dict, masks, is_determenistic)
                     else:
-                        action = self.get_action(obs_dict, is_determenistic)
+                        action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding} , is_determenistic)
 
                     obs_dict, r, done, info = self.env_step(self.env, action)
 

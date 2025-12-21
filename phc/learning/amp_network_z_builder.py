@@ -9,6 +9,7 @@ from phc.utils.torch_utils import project_to_norm
 from phc.learning.vq_quantizer import EMAVectorQuantizer, Quantizer
 from phc.utils.flags import flags
 DISC_LOGIT_INIT_SCALE = 1.0
+import os
 
 
 class AMPZBuilder(AMPBuilder):
@@ -65,7 +66,32 @@ class AMPZBuilder(AMPBuilder):
             if self.separate:
                 self._build_critic_z_mlp()
                 
-                
+
+            # import joblib
+            # from pathlib import Path
+            # script_dir = Path(__file__).parent
+            # relative_pkl_path = "../../data/amass/text_embedding_dict_clip.pkl"
+            # clip_pkl_path = script_dir / relative_pkl_path
+            #
+            # if os.path.exists(clip_pkl_path):
+            #     print(f"Loading CLIP embeddings from: {clip_pkl_path} ...")
+            #     with open(clip_pkl_path, "rb") as f:
+            #         self.clip_embedding_dict = joblib.load(f)
+            #
+            #     print("Loaded keys:", list(self.clip_embedding_dict.keys())[:10])
+            # else:
+            #     print("File does not exist!")
+            #
+            # all_embeddings = []
+            # all_texts = []
+            #
+            # for text, emb in self.clip_embedding_dict.items():
+            #     emb = torch.as_tensor(emb).view(-1).cuda()
+            #     all_embeddings.append(emb)
+            #     all_texts.append(text)
+            #
+            # self.master_embeddings = torch.stack(all_embeddings)
+            # self.master_texts = all_texts
             self.actor_mlp
 
         def load(self, params):
@@ -153,7 +179,27 @@ class AMPZBuilder(AMPBuilder):
                     flags.trigger_input = False
                     flags.debug = not flags.debug
                     # enhance = 0.5
-                
+
+                ###############################################
+                # Check Text label
+                ###############################################
+                # clip_embedding_cur = obs_dict['clip_embedding']
+
+                # def find_exact_embedding(target_emb, master_embeddings, master_texts):
+                #
+                #     target_emb = target_emb.view(1, -1)  # Make it (1, 512)
+                #     equality_mask = torch.eq(target_emb, master_embeddings)
+                #     match_index = torch.all(equality_mask, dim=1)
+                #     indices = torch.nonzero(match_index, as_tuple=True)[0]
+                #
+                #     if indices.numel() > 0:
+                #         first_match_index = indices[0].item()
+                #         return master_texts[first_match_index]
+                #     else:
+                #         return None
+                # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
+                # print("Predicted text:", text)
+                ###############################################
                 if flags.debug:
                     if flags.trigger_input:
                         indexes_input = input("Enter word indexes:")
@@ -165,6 +211,24 @@ class AMPZBuilder(AMPBuilder):
                         flags.trigger_input = False
                     # import ipdb; ipdb.set_trace()
                     # self.debug_idxes =  self.embedding_size//self.embedding_partion, self.embedding_partion
+
+                    # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
+                    #     embedding = clip_embedding_dict.get(key)
+                    #
+                    #     if embedding is None:
+                    #         print("key not found")
+                    #         import ipdb;
+                    #         ipdb.set_trace()
+                    #
+                    #     if isinstance(embedding, np.ndarray):
+                    #         embedding = torch.from_numpy(embedding).float()
+                    #     elif isinstance(embedding, (list, tuple)):
+                    #         embedding = torch.tensor(embedding, dtype=torch.float32)
+                    #
+                    #     return embedding
+                    # clip_embedding = get_clip_embedding("walk forward", self.clip_embedding_dict).unsqueeze(0).cuda()
+                    # obs_dict['clip_embedding'] = clip_embedding
+
                     prior_mu = self.compute_vq_prior(obs_dict)
                     _, z_out, _ = self.quantizer(prior_mu)
                     # indexes = torch.tensor(self.debug_idxes)

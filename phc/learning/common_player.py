@@ -8,7 +8,8 @@ from rl_games.common.player import BasePlayer
 import numpy as np
 import gc
 from gym import spaces
-
+from rl_games.algos_torch.players import rescale_actions
+from rl_games.common.tr_helpers import unsqueeze_obs
 
 class CommonPlayer(players.PpoPlayerContinuous):
 
@@ -152,8 +153,33 @@ class CommonPlayer(players.PpoPlayerContinuous):
         return obs_dict
 
     def get_action(self, obs_dict, is_determenistic=False):
-        output = super().get_action(obs_dict['obs'], is_determenistic)
-        return output
+        obs = obs_dict['obs']
+        if self.has_batch_dimension == False:
+            obs = unsqueeze_obs(obs)
+        obs = self._preproc_obs(obs)
+        input_dict = {
+            'is_train': False,
+            'prev_actions': None,
+            'obs': obs,
+            'rnn_states': self.states,
+            'clip_embedding': obs_dict['clip_embedding']
+        }
+        with torch.no_grad():
+            res_dict = self.model(input_dict)
+        mu = res_dict['mus']
+        action = res_dict['actions']
+        self.states = res_dict['rnn_states']
+        if is_determenistic:
+            current_action = mu
+        else:
+            current_action = action
+        if self.has_batch_dimension == False:
+            current_action = torch.squeeze(current_action.detach())
+
+        if self.clip_actions:
+            return rescale_actions(self.actions_low, self.actions_high, torch.clamp(current_action, -1.0, 1.0))
+        else:
+            return current_action
 
     def env_step(self, env, actions):
         if not self.is_tensor_obses:
@@ -190,8 +216,8 @@ class CommonPlayer(players.PpoPlayerContinuous):
         return
 
     def env_reset(self, env_ids=None):
-        obs = self.env.reset(env_ids)
-        return self.obs_to_torch(obs)
+        obs, clip_embedding = self.env.reset(env_ids)
+        return self.obs_to_torch(obs), clip_embedding
 
     def _post_step(self, info):
         return
