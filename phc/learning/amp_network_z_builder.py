@@ -310,7 +310,10 @@ class AMPZBuilder(AMPBuilder):
         def compute_vq_prior(self, obs_dict):
             obs = obs_dict['obs']
             self_obs = obs[:, :self.self_obs_size]
-
+            if self.training:
+                drop_prob = 0.4
+                mask = (torch.rand(self_obs.shape[0], 1, device=self_obs.device) > drop_prob).float()
+                self_obs = self_obs * mask
             text_feat = self.text_adapter(obs_dict['clip_embedding'])
             self_obs_withText = torch.cat([self_obs, text_feat], dim=1)
 

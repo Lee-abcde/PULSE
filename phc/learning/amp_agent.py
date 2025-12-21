@@ -857,17 +857,43 @@ class AMPAgent(common_agent.CommonAgent):
                     time_zs = extra_dict['quantized_z_out'].view(
                         self.minibatch_size // self.horizon_length, self.horizon_length, -1
                     )
-                    phi = 0.99
-                    error = time_zs[:, 1:] - time_zs[:, :-1] * phi
-                    idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
-                                                          self.horizon_length, -1)
-                    not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
-                    error = error.view(-1, error.shape[-1])
-                    error[not_consecs] = 0
-                    starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(-1)
-                    error[starteres] = 0
-                    ar1_prior = torch.norm(error, dim=-1).mean()
-                    info_dict["kin_ar1"] = ar1_prior
+                    time_clips = batch_dict['clip_embedding'].view(
+                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                    )
+                    idxes = kin_dict['progress_buf'].view(
+                        self.minibatch_size // self.horizon_length, self.horizon_length, -1
+                    )
+                    z_diff = time_zs[:, 1:] - time_zs[:, :-1]
+                    z_diff_flat = z_diff.reshape(-1, z_diff.shape[-1])
+                    clip_diff = time_clips[:, 1:] - time_clips[:, :-1]
+                    clip_diff_flat = clip_diff.reshape(-1, clip_diff.shape[-1])
+
+                    is_same_semantic = torch.norm(clip_diff_flat, dim=-1) < 1e-4
+                    starter_mask = ((idxes <= 2)[:, 1:] | (idxes <= 2)[:, :-1]).view(-1)
+                    smooth_mask = is_same_semantic & (~starter_mask)
+                    smooth_diffs = z_diff_flat[smooth_mask]
+                    if smooth_diffs.shape[0] > 0:
+                        # Standard Euclidean distance minimization
+                        state_smooth_loss = torch.norm(smooth_diffs, dim=-1).mean()
+                    else:
+                        state_smooth_loss = 0.0
+
+                    info_dict["kin_state_smooth"] = state_smooth_loss
+
+                    repulsion_mask = (~is_same_semantic) & (~starter_mask)
+
+                    repulse_diffs = z_diff_flat[repulsion_mask]
+
+                    if repulse_diffs.shape[0] > 0:
+                        boundary_dist = torch.norm(repulse_diffs, dim=-1)
+                        # Exp decay: 1.0 when dist is 0, decays to 0.0 as dist increases
+                        # Note: If gradients are too small, divide dist by a temperature: exp(-dist / 0.1)
+                        state_repulsion_loss = torch.exp(-boundary_dist).mean()
+                    else:
+                        state_repulsion_loss = 0.0
+
+                    info_dict["kin_state_repulsion"] = state_repulsion_loss
+                    ar1_prior = state_smooth_loss + state_repulsion_loss
 
                 # ----------- 正则项 -----------
                 z_q = extra_dict['quantized_z_out']
