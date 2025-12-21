@@ -143,8 +143,9 @@ class AMPZBuilder(AMPBuilder):
                         
                 if self.use_vae_sphere_posterior:
                     task_out_proj = project_to_norm(task_out_proj, norm=self.embedding_norm, z_type="sphere")
-                
-                extra_dict = {"vae_mu": vae_mu, "vae_log_var": vae_log_var, "noise": self.z_noise}
+
+                projected_clip_embedding = self.state_proj_head(task_out_proj)
+                extra_dict = {"vae_mu": vae_mu, "vae_log_var": vae_log_var, "noise": self.z_noise, 'projected_clip_embedding': projected_clip_embedding}
                 
                 
                 # prior_mu, prior_logvar = self.compute_prior(obs_dict)
@@ -293,8 +294,10 @@ class AMPZBuilder(AMPBuilder):
         def compute_prior(self, obs_dict):
             obs = obs_dict['obs']
             self_obs = obs[:, :self.self_obs_size]
-            
-            prior_latent = self.z_prior(self_obs)
+
+            text_feat = self.text_adapter(obs_dict['clip_embedding'])
+            self_obs_withText = torch.cat([self_obs, text_feat], dim=1)
+            prior_latent = self.z_prior(self_obs_withText)
             prior_mu = self.z_prior_mu(prior_latent)
             if self.use_vae_prior:
                 prior_logvar = self.z_prior_logvar(prior_latent)
@@ -591,9 +594,13 @@ class AMPZBuilder(AMPBuilder):
                 self.z_logvar = nn.Linear(in_features=self.embedding_size * 5, out_features=self.embedding_size)
                 
                 init_mlp(self.z_mu, mlp_init); init_mlp(self.z_logvar, mlp_init)
-                
+                self.num_embed = 32
+                self.state_proj_head = nn.Linear(self.num_embed, 512)
+                self.text_adapter = nn.Sequential(
+                    nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
+                )
                 if self.use_vae_prior:
-                    mlp_args = {'input_size': self_obs_size, 'units': self._task_units, 'activation': self._task_activation, 'dense_func': torch.nn.Linear}
+                    mlp_args = {'input_size': self_obs_size + self.clip_dim, 'units': self._task_units, 'activation': self._task_activation, 'dense_func': torch.nn.Linear}
                     self.z_prior = self._build_mlp(**mlp_args)
                     self.z_prior_mu = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)
                     self.z_prior_logvar = nn.Linear(in_features=self._task_units[-1], out_features=self.embedding_size)

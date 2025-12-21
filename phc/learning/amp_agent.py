@@ -815,8 +815,17 @@ class AMPAgent(common_agent.CommonAgent):
                     prior_var_regu = ((prior_log_var ** 2).mean() + (vae_log_var ** 2).mean()) * 0.001 # penalize large variance values
                     regu_prior = prior_mean_regu + prior_var_regu
                     info_dict["kin_prior_regu"] = regu_prior
-                
-                kin_loss = kin_action_loss +  KLD * humanoid_env.kld_coefficient + ar1_prior * humanoid_env.ar1_coefficient + regu_prior * 0.005
+
+                # ----------- (Semantic Alignment Loss) -----------
+                projected_clip_embedding = extra_dict['projected_clip_embedding']
+                state_norm = torch.nn.functional.normalize(projected_clip_embedding, p=2, dim=1)
+                clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding'], p=2, dim=1)
+                semantic_loss = 1.0 - (state_norm * clip_norm).sum(dim=1).mean()
+                info_dict["kin_semantic"] = semantic_loss
+
+                kin_loss = kin_action_loss +  KLD * humanoid_env.kld_coefficient \
+                           + ar1_prior * humanoid_env.ar1_coefficient + regu_prior * 0.005 \
+                           + semantic_loss * 0.005
                 
                 
                 info_dict["kin_action_loss"] = kin_action_loss
