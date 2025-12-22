@@ -19,5 +19,6 @@ flags = Flags({
     "P_upper_inc": False,
     "Index_dec": False,
     "Index_inc": False,
-    "reset": False
+    "reset": False,
+    "text_change": False
     })

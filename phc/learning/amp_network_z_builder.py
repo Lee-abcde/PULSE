@@ -74,7 +74,7 @@ class AMPZBuilder(AMPBuilder):
                 self._build_z_reader()
             if self.separate:
                 self._build_critic_z_mlp()
-
+            self.input_text = "walk"
             # import os
             # import joblib
             # from pathlib import Path
@@ -426,24 +426,15 @@ class AMPZBuilder(AMPBuilder):
                     state = self.quantizer.embedding(debug_indices)
 
                     f = torch.tensor([[self.debug_freq]], device=state.device)  # fixed frequency
-                    # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
-                    #     embedding = clip_embedding_dict.get(key)
-                    #
-                    #     if embedding is None:
-                    #         print("key not found")
-                    #         import ipdb;
-                    #         ipdb.set_trace()
-                    #
-                    #     if isinstance(embedding, np.ndarray):
-                    #         embedding = torch.from_numpy(embedding).float()
-                    #     elif isinstance(embedding, (list, tuple)):
-                    #         embedding = torch.tensor(embedding, dtype=torch.float32)
-                    #
-                    #     return embedding
-                    # clip_embedding = get_clip_embedding("walk", self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
-                    # prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
-                    # extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat']}
-                    # return prior_mu, extra_dict
+
+                    if flags.text_change:
+                        import ipdb;
+                        ipdb.set_trace()
+                        flags.text_change = False
+                    clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
+                    prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
+                    extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat']}
+                    return prior_mu, extra_dict
 
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
                     self.debug_phase_p = torch.where(
@@ -468,8 +459,19 @@ class AMPZBuilder(AMPBuilder):
 
             # print(task_out_proj.max(), task_out_proj.min())
             return task_out_proj, extra_dict
-        
-        
+
+        def get_clip_embedding(self, key: str, clip_embedding_dict) -> torch.Tensor:
+            embedding = clip_embedding_dict.get(key)
+            if embedding is None:
+                print("key not found")
+                import ipdb;
+                ipdb.set_trace()
+            if isinstance(embedding, np.ndarray):
+                embedding = torch.from_numpy(embedding).float()
+            elif isinstance(embedding, (list, tuple)):
+                embedding = torch.tensor(embedding, dtype=torch.float32)
+            return embedding
+
         def compute_prior(self, obs_dict):
             obs = obs_dict['obs']
             self_obs = obs[:, :self.self_obs_size]
