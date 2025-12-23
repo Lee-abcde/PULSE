@@ -365,6 +365,8 @@ class AMPAgent(common_agent.CommonAgent):
                 self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
                 self.clip_embedding_window[done_indices] = 0.0
                 self.clip_embedding_window[done_indices, -1, :] = self.clip_embedding[done_indices]
+                # For check the correctness of "stand up" embedding
+                # print(self.clip_embedding)
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
@@ -388,6 +390,8 @@ class AMPAgent(common_agent.CommonAgent):
             if self.only_kin_loss and self.save_kin_info:
                 # pure behavior cloning, kinemaitc loss.
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'][:,-1,:])
+                # For check the correctness of "stand up" embedding
+                # print(self.dones, infos['kin_dict']['progress_buf'], infos['terminate'])
             else:
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
 

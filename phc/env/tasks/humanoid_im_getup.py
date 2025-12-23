@@ -37,6 +37,10 @@ from isaacgym.torch_utils import *
 
 from utils import torch_utils
 from phc.utils.flags import flags
+import os
+import joblib
+import torch
+from pathlib import Path
 
 
 class HumanoidImGetup(HumanoidIm):
@@ -61,7 +65,7 @@ class HumanoidImGetup(HumanoidIm):
         self._recovery_counter = torch.zeros(self.num_envs, device=self.device, dtype=torch.int)
 
         self._generate_fall_states()
-
+        self._load_stand_up_embedding()
         return
 
     def update_getup_schedule(self, epoch_num, getup_udpate_epoch=5000):
@@ -204,7 +208,61 @@ class HumanoidImGetup(HumanoidIm):
         super()._compute_reset()
 
         is_recovery = self._recovery_counter > 0
+        # For check the correctness of "stand up" embedding
+        # print("is_recovery: ", is_recovery, self._recovery_counter)
         self.reset_buf[is_recovery] = 0
         self._terminate_buf[is_recovery] = 0
         self.progress_buf[is_recovery] -= 1  # ZL: do not advance progress buffer for these.
         return
+
+    def _compute_task_obs(self, env_ids=None, save_buffer=True):
+        obs, clip_embedding = super()._compute_task_obs(env_ids, save_buffer)
+
+        if env_ids is None:
+            is_recovery = self._recovery_counter > 0
+        else:
+            is_recovery = self._recovery_counter[env_ids] > 0
+
+        if torch.any(is_recovery):
+            clip_embedding[is_recovery] = self.stand_up_embedding
+        # For check the correctness of "stand up" embedding
+        # print("second print is_recovery: ",self._recovery_counter, clip_embedding)
+        return obs, clip_embedding
+
+    def _load_stand_up_embedding(self):
+        script_dir = Path(__file__).parent
+        relative_pkl_path = "../../../data/amass/text_embedding_dict_clip.pkl"
+        clip_pkl_path = (script_dir / relative_pkl_path).resolve()
+
+        self.stand_up_embedding = None
+
+        if os.path.exists(clip_pkl_path):
+            print(f"Loading CLIP embeddings from: {clip_pkl_path} ...")
+            try:
+                with open(clip_pkl_path, "rb") as f:
+                    clip_embedding_dict = joblib.load(f)
+
+                target_keys = ['stand up', 'standup', 'get up', 'rise', 'recover']
+                found_key = None
+
+                for key in target_keys:
+                    if key in clip_embedding_dict:
+                        found_key = key
+                        break
+
+                if found_key:
+                    print(f"Found recovery embedding for key: '{found_key}'")
+                    emb = clip_embedding_dict[found_key]
+                    self.stand_up_embedding = torch.as_tensor(emb, dtype=torch.float32).view(-1).to(self.device)
+                else:
+                    print(
+                        f"Warning: 'stand up' keys not found. Available keys sample: {list(clip_embedding_dict.keys())[:5]}")
+
+            except Exception as e:
+                print(f"Error loading pickle: {e}")
+        else:
+            print(f"File not found: {clip_pkl_path}")
+
+        if self.stand_up_embedding is None:
+            print("Using ZERO vector as fallback for stand up embedding.")
+            self.stand_up_embedding = torch.zeros(512, device=self.device)
