@@ -13,6 +13,9 @@ from functools import partial
 DISC_LOGIT_INIT_SCALE = 1.0
 import csv
 import os
+import matplotlib.pyplot as plt
+from collections import deque
+from sklearn.decomposition import PCA
 
 class AMPZBuilder(AMPBuilder):
 
@@ -104,6 +107,23 @@ class AMPZBuilder(AMPBuilder):
             #
             # self.RECORD_FILE = clip_pkl_path.parent / 'vq_pae_records.csv'
             # self.initialize_record_file(self.RECORD_FILE)
+
+            ###########################################
+            # Visualization Normalized Observation
+            ##########################################
+            # self.vis_history_len = 300  # Keep last 300 frames
+            # self.raw_data_buffer = deque(maxlen=self.vis_history_len)
+            # self.pca_fitter = PCA(n_components=2)
+            #
+            # # Setup interactive plotting
+            # plt.ion()
+            # self.fig, self.axs = plt.subplots(1, 2, figsize=(10, 5))
+            # self.line_raw, = self.axs[0].plot([], [])
+            # self.scatter_pca = self.axs[1].scatter([], [], s=5, c='blue')
+            #
+            # self.axs[0].set_title("Raw Feature (Dims 0-2)")
+            # self.axs[1].set_title("PCA Trajectory (Limit Cycle)")
+            # self.vis_counter = 0
             self.actor_mlp
 
         def load(self, params):
@@ -187,6 +207,39 @@ class AMPZBuilder(AMPBuilder):
             return f, a, b, p
 
         def form_embedding(self, task_out_z, obs_dict = None):
+            ###########################################
+            # Visualization Normalized Observation
+            ##########################################
+            # try:
+            #     if task_out_z.dim() == 3:
+            #         last_frame = task_out_z[0, -1, :].detach().cpu().numpy()
+            #     elif task_out_z.dim() == 2:
+            #         last_frame = task_out_z[0, :].detach().cpu().numpy()
+            #     else:
+            #         last_frame = None
+            #     if last_frame is not None:
+            #         self.raw_data_buffer.append(last_frame)
+            #         self.vis_counter += 1
+            #         # Update plot every 5 steps to prevent lag
+            #         if len(self.raw_data_buffer) > 66:
+            #             data_arr = np.array(self.raw_data_buffer)  # Shape: [Time, Features]
+            #             # Plot 1: Raw Data (First 3 dims to see rhythm)
+            #             self.axs[0].clear()
+            #             self.axs[0].plot(data_arr[:, :3])
+            #             self.axs[0].set_title("Raw Features (Time)")
+            #             # Plot 2: PCA Projection (The Manifold)
+            #             if len(self.raw_data_buffer) > 20:
+            #                 pca_res = self.pca_fitter.fit_transform(data_arr)
+            #                 self.axs[1].clear()
+            #                 # Color points by time (fading tail)
+            #                 colors = np.linspace(0, 1, len(pca_res))
+            #                 self.axs[1].scatter(pca_res[:, 0], pca_res[:, 1], c=colors, cmap='viridis', s=10)
+            #                 self.axs[1].set_title("PCA Trajectory (Phase Space)")
+            #             plt.pause(0.001)
+            #             import ipdb; ipdb.set_trace()
+            # except Exception as e:
+            #     print(f"Vis Error: {e}")
+
             extra_dict = {}
             if task_out_z.dim() == 2:
                 B, N = task_out_z.shape
