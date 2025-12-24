@@ -1011,34 +1011,37 @@ class AMPAgent(common_agent.CommonAgent):
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
 
-                time_clip_wins = clip_embedding_window.view(self.minibatch_size // self.horizon_length,
-                                                            self.horizon_length,
-                                                            clip_embedding_window.shape[1],
-                                                            clip_embedding_window.shape[2])
-                win_diff = time_clip_wins[:, 1:] - time_clip_wins[:, :-1]
-                win_diff_flat = win_diff.reshape(-1, win_diff.shape[-2] * win_diff.shape[-1])
-                is_same_semantic = torch.norm(win_diff_flat, dim=-1) < 1e-4
-                starter_mask = ((idxes <= self.window_size)[:, 1:] + (idxes <= self.window_size)[:, :-1]).view(-1)
-                ignore_smoothness = (~is_same_semantic) | starter_mask
+                # (B*H, W, D)
+                wins = clip_embedding_window.view(-1, self.window_size, clip_embedding_window.shape[-1])
 
-                pred_state = extra_dict['state_after_quant']
-                time_states = pred_state.view(self.minibatch_size // self.horizon_length,
-                                              self.horizon_length, -1)
-                state_diff = time_states[:, 1:] - time_states[:, :-1]
-                state_diff = state_diff.view(-1, state_diff.shape[-1])
+                # representative semantic embedding = last frame
+                rep_embed = wins[:, -1]  # (B*H, D)
+
+                rep_embed = rep_embed.view(self.minibatch_size // self.horizon_length,
+                                           self.horizon_length, -1)
+
+                is_same_semantic = (
+                        torch.norm(rep_embed[:, 1:] - rep_embed[:, :-1], dim=-1) < 1e-4
+                ).view(-1)
+
+                time_states = extra_dict['state_after_quant'].view(
+                    self.minibatch_size // self.horizon_length,
+                    self.horizon_length, -1
+                )
+
+                state_diff = (time_states[:, 1:] - time_states[:, :-1]).reshape(-1, time_states.shape[-1])
+
+                # smoothness when semantic same
                 smooth_diff = state_diff.clone()
-                smooth_diff[ignore_smoothness] = 0
-                state_smooth_loss = torch.norm(smooth_diff, dim=-1).mean()
-                info_dict["kin_state_smooth"] = state_smooth_loss
-                # handling negative case
-                repulsion_mask = (~is_same_semantic) & (~starter_mask)
-                repulse_diff = state_diff[repulsion_mask]
-                if repulse_diff.shape[0] > 0:
-                    boundary_dist = torch.norm(repulse_diff, dim=-1)
-                    state_repulsion_loss = torch.exp(-boundary_dist).mean()
-                else:
-                    state_repulsion_loss = 0.0
-                info_dict["kin_state_repulsion"] = state_repulsion_loss
+                smooth_diff[~is_same_semantic] = 0
+                info_dict["kin_state_smooth"] = state_smooth_loss = torch.norm(smooth_diff, dim=-1).mean()
+
+                # repulsion when semantic changes
+                repulse_diff = state_diff[~is_same_semantic]
+                info_dict["kin_state_repulsion"] = state_repulsion_loss = (
+                    torch.exp(-torch.norm(repulse_diff, dim=-1)).mean()
+                    if repulse_diff.numel() > 0 else 0.0
+                )
 
                 # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
                 not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
