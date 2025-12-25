@@ -124,6 +124,16 @@ class AMPZBuilder(AMPBuilder):
             # self.axs[0].set_title("Raw Feature (Dims 0-2)")
             # self.axs[1].set_title("PCA Trajectory (Limit Cycle)")
             # self.vis_counter = 0
+            ###########################################
+            # Visualization Model Action
+            ##########################################
+            # self.mu_hist_len = 300
+            # self.mu_buffer = deque(maxlen=self.mu_hist_len)
+            # self.mu_pca = PCA(n_components=2)
+            # self.fig_mu, self.ax_mu = plt.subplots(figsize=(6, 6))
+            # self.ax_mu.set_title("Action (Mu) Phase Space")
+            # plt.ion()
+            # self.mu_vis_timer = 0
             self.actor_mlp
 
         def load(self, params):
@@ -232,6 +242,7 @@ class AMPZBuilder(AMPBuilder):
             #                 pca_res = self.pca_fitter.fit_transform(data_arr)
             #                 self.axs[1].clear()
             #                 # Color points by time (fading tail)
+            #                 self.axs[1].plot(pca_res[:, 0], pca_res[:, 1], color='gray', linewidth=1, alpha=0.5)
             #                 colors = np.linspace(0, 1, len(pca_res))
             #                 self.axs[1].scatter(pca_res[:, 0], pca_res[:, 1], c=colors, cmap='viridis', s=10)
             #                 self.axs[1].set_title("PCA Trajectory (Phase Space)")
@@ -799,6 +810,10 @@ class AMPZBuilder(AMPBuilder):
                 
                 if self.is_continuous:
                     mu = self.mu_act(self.mu(a_out))
+                    ###########################################
+                    # Visualization Model Action
+                    ##########################################
+                    # self._visualize_mu(mu)
                     if self.space_config['fixed_sigma']:
                         sigma = mu * 0.0 + self.sigma_act(self.sigma)
                     else:
@@ -808,6 +823,58 @@ class AMPZBuilder(AMPBuilder):
                         return mu, sigma, extra_dict
                     else:
                         return mu, sigma
+
+        def _visualize_mu(self, mu):
+            """
+            Projects the high-dim action mean (mu) to 2D PCA to check for periodicity.
+            """
+            try:
+                # Handle shapes: [Batch, Dim] or [Batch, Time, Dim]
+                # We always take Batch 0, Last Time Step
+                if mu.dim() == 2:
+                    current_mu = mu[0].detach().cpu().numpy()
+                elif mu.dim() == 3:
+                    current_mu = mu[0, -1, :].detach().cpu().numpy()
+                else:
+                    return
+
+                self.mu_buffer.append(current_mu)
+                self.mu_vis_timer += 1
+
+                # Update plot every 5 steps
+                if len(self.mu_buffer) > 65:
+                    data = np.array(self.mu_buffer)
+
+                    # Fit PCA
+                    projected = self.mu_pca.fit_transform(data)
+
+                    self.ax_mu.clear()
+                    self.ax_mu.plot(projected[:, 0], projected[:, 1], color='gray', alpha=0.3, linewidth=1)
+
+                    # 2. Draw the dots (Time)
+                    colors = np.linspace(0, 1, len(projected))
+                    self.ax_mu.scatter(projected[:, 0], projected[:, 1], c=colors, cmap='plasma', s=20)
+
+                    # 3. Draw Digital Numbers (Indices)
+                    # We iterate through the points and add text labels
+                    total_points = len(projected)
+                    for i in range(total_points):
+                        # Label the first point, the last point, and every 5th point in between
+                        if i == 0 or i == total_points - 1 or i % 5 == 0:
+                            self.ax_mu.text(
+                                projected[i, 0],
+                                projected[i, 1],
+                                str(i),  # The number to draw
+                                fontsize=9,
+                                color='black',
+                                fontweight='bold' if i == total_points - 1 else 'normal'
+                            )
+
+                    self.ax_mu.set_title(f"Action Mean Trajectory (Step {self.mu_vis_timer})")
+                    plt.pause(0.001)
+                    import ipdb; ipdb.set_trace()
+            except Exception as e:
+                print(f"Mu Vis Error: {e}")
 
         def _build_z_mlp(self):
             self_obs_size, task_obs_size, task_obs_size_detail = self.self_obs_size, self.task_obs_size, self.task_obs_size_detail
