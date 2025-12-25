@@ -104,7 +104,12 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['clip_embedding_window'] = torch.zeros(
             clip_buffer_shape, dtype=torch.float32, device=self.ppo_device
         )
-        self.tensor_list += ['next_obses', 'obs_window', 'clip_embedding_window']
+        action_dim = 69
+        action_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, action_dim)
+        self.experience_buffer.tensor_dict['gt_action_window'] = torch.zeros(
+            action_buffer_shape, dtype=torch.float32, device=self.ppo_device
+        )
+        self.tensor_list += ['next_obses', 'obs_window', 'clip_embedding_window', 'gt_action_window']
         return
 
     def train(self):

@@ -351,10 +351,14 @@ class AMPAgent(common_agent.CommonAgent):
         W = self.window_size
         obs_dim = self.obs['obs'].shape[-1]
         clip_dim = self.clip_embedding.shape[-1]
-        self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
-        self.obs_window[:, -1, :] = self.obs['obs']
-        self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
-        self.clip_embedding_window[:, -1, :] = self.clip_embedding
+        self.gt_action_dim = 69
+        if not hasattr(self, 'obs_window') or self.obs_window is None:
+            self.obs, self.clip_embedding = self.env_reset(done_indices)
+            self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
+            self.obs_window[:, -1, :] = self.obs['obs']
+            self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
+            self.clip_embedding_window[:, -1, :] = self.clip_embedding
+            self.gt_action_window = torch.zeros((self.num_actors, W, self.gt_action_dim), device=self.device)
 
         for n in range(self.horizon_length):
 
@@ -367,6 +371,7 @@ class AMPAgent(common_agent.CommonAgent):
                 self.clip_embedding_window[done_indices, -1, :] = self.clip_embedding[done_indices]
                 # For check the correctness of "stand up" embedding
                 # print(self.clip_embedding)
+                self.gt_action_window[done_indices] = 0.0
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
@@ -399,12 +404,15 @@ class AMPAgent(common_agent.CommonAgent):
             self.obs_window[:, -1, :] = self.obs['obs']
             self.clip_embedding_window = torch.roll( self.clip_embedding_window, shifts=-1, dims=1)
             self.clip_embedding_window[:, -1, :] = self.clip_embedding
+            self.gt_action_window = torch.roll(self.gt_action_window, shifts=-1, dims=1)
+            self.gt_action_window[:, -1, :] = infos['kin_dict']['gt_action']
 
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
             self.experience_buffer.update_data('next_obses', n, self.obs['obs'])
             self.experience_buffer.update_data('dones', n, self.dones)
             self.experience_buffer.update_data('amp_obs', n, infos['amp_obs'])
+            self.experience_buffer.update_data('gt_action_window', n, self.gt_action_window)
             
             if self.save_kin_info:
                 self.experience_buffer.update_data('kin_dict', n, torch.cat([v.reshape(v.shape[0], -1) for k, v in infos['kin_dict'].items()], dim = -1))
@@ -478,6 +486,7 @@ class AMPAgent(common_agent.CommonAgent):
         dataset_dict['amp_obs_replay'] = batch_dict['amp_obs_replay']
         dataset_dict['obs_window'] = batch_dict['obs_window']
         dataset_dict['clip_embedding_window'] = batch_dict['clip_embedding_window']
+        dataset_dict['gt_action_window'] = batch_dict['gt_action_window']
 
         if self.save_kin_info:
             dataset_dict['kin_dict'] = batch_dict['kin_dict']
@@ -677,7 +686,7 @@ class AMPAgent(common_agent.CommonAgent):
             batch_dict['obs'] = input_dict['obs_processed']
             batch_dict['kin_dict'] = input_dict['kin_dict']
             batch_dict['clip_embedding_window'] = input_dict['clip_embedding_window'].reshape(input_dict['clip_embedding_window'].shape[0], self.window_size, -1)
-            
+            batch_dict['gt_action_window'] = input_dict['gt_action_window'].reshape(input_dict['gt_action_window'].shape[0], self.window_size, -1)
             # if humanoid_env.z_type == "vae":
             #     batch_dict['z_noise'] = input_dict['z_noise']
             
@@ -929,13 +938,7 @@ class AMPAgent(common_agent.CommonAgent):
                 with torch.no_grad():
                     effective_mask = self.calculate_effective_mask(batch_dict['obs_orig'])
                     B, T = effective_mask.shape
-                    D = gt_action.size(-1)
-                    gt_action_full = torch.zeros(B, T, D, device=gt_action.device)
-
-                    for i in range(B):
-                        # indices of effective frames
-                        eff_len = effective_mask[i].sum().int().item()
-                        gt_action_full[i, -eff_len:, :] = gt_action[i-eff_len+1:i+1, :]
+                    gt_action_full = batch_dict['gt_action_window']
 
                     alpha = 3.0  # 控制指数增长速度，越大越陡
                     time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T

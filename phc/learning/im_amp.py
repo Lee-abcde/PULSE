@@ -192,10 +192,14 @@ class IMAmpAgent(amp_agent.AMPAgent):
         W = self.window_size
         obs_dim = obs_dict['obs'].shape[-1]
         clip_dim = clip_embedding.shape[-1]
-        self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
-        self.obs_window[:, -1, :] = obs_dict['obs']
-        self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
-        self.clip_embedding_window[:, -1, :] = clip_embedding
+        done_indices = []
+        if not hasattr(self, 'obs_window') or self.obs_window is None:
+            obs_dict, clip_embedding = self.env_reset(done_indices)
+            self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
+            self.obs_window[:, -1, :] = obs_dict['obs']
+            self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
+            self.clip_embedding_window[:, -1, :] = clip_embedding
+
 
         if need_init_rnn:
             self.init_rnn()
@@ -204,7 +208,6 @@ class IMAmpAgent(amp_agent.AMPAgent):
         cr = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
         steps = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
 
-        done_indices = []
 
         with torch.no_grad():
             while True:

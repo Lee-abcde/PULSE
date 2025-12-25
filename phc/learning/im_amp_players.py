@@ -247,11 +247,13 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
 
             W = self.window_size
             obs_dim = obs_dict['obs'].shape[-1]
-            self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
-            self.obs_window[:, -1, :] = obs_dict['obs']
             clip_dim = clip_embedding.shape[-1]
-            self.clip_embedding_window = torch.zeros((batch_size, W, clip_dim), device=self.device)
-            self.clip_embedding_window[:, -1, :] = clip_embedding
+            if not hasattr(self, 'obs_window') or self.obs_window is None:
+                obs_dict, clip_embedding = self.env_reset(done_indices)
+                self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
+                self.obs_window[:, -1, :] = obs_dict['obs']
+                self.clip_embedding_window = torch.zeros((batch_size, W, clip_dim), device=self.device)
+                self.clip_embedding_window[:, -1, :] = clip_embedding
             with torch.no_grad():
                 for n in range(self.max_steps):
                     obs_dict, clip_embedding = self.env_reset(done_indices)
