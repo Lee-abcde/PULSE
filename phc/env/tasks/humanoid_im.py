@@ -1186,13 +1186,21 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
 
             if self._occl_training:
                 ref_body_pos[self.random_occlu_idx[:, self._reset_bodies_id]] = body_pos[self.random_occlu_idx[:, self._reset_bodies_id]]
-
+            ###########################
+            # debug
+            ###########################
+            # print("pass time", self.progress_buf, pass_time, self._motion_start_times, time)
+            # if torch.any(pass_time):
+            #     import ipdb;ipdb.set_trace()
             self.reset_buf[:], self._terminate_buf[:] = compute_humanoid_im_reset(self.reset_buf, self.progress_buf, self._contact_forces, self._contact_body_ids, \
                                                                                body_pos, ref_body_pos, pass_time, self._enable_early_termination,
                                                                                self._termination_distances[..., self._reset_bodies_id], flags.no_collision_check, flags.im_eval and (not self.strict_eval))
         is_recovery = torch.logical_and(~pass_time, self._cycle_counter > 0)  # pass time should override the cycle counter.
         self.reset_buf[is_recovery] = 0
         self._terminate_buf[is_recovery] = 0
+        if self.external_reset_triggered:
+            self.reset_buf[:] = 1
+            self.external_reset_triggered = False
         
         return
 

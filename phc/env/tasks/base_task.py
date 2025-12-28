@@ -131,6 +131,7 @@ class BaseTask():
             # bgsk = threading.Thread(target=self.setup_video_client, daemon=True).start()
             bgsk = threading.Thread(target=self.setup_talk_client, daemon=False).start()
 
+        self.external_reset_triggered = False
     def create_viewer(self):
         if self.headless == False:
             # headless server mode will use the smart display
@@ -356,6 +357,7 @@ class BaseTask():
                     self._clear_recorded_states()
                 elif evt.action == "reset" and evt.value > 0:
                     self.reset()
+                    self.external_reset_triggered = True
                     flags.reset = not flags.reset
                 elif evt.action == "follow" and evt.value > 0:
                     flags.follow = not flags.follow
