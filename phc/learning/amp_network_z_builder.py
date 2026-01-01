@@ -569,6 +569,9 @@ class AMPZBuilder(AMPBuilder):
             return prior_mu
 
         def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
+            is_valid = (clip_embedding_window.abs().sum(dim=-1) > 1e-6)
+            valid_mask = is_valid.unsqueeze(1).float()
+
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
             if self.training:
                 drop_prob = 0.4
@@ -578,8 +581,9 @@ class AMPZBuilder(AMPBuilder):
             self_obs = torch.cat([self_obs.permute(0, 2, 1), text_feat], dim=1)
 
             prior_latent = self.prior_z_encoder(self_obs)
-
-            state_input = prior_latent.mean(axis=-1)
+            sum_latent = (prior_latent * valid_mask).sum(dim=-1)
+            valid_counts = valid_mask.sum(dim=-1)  # Shape: [B, 1]
+            state_input = sum_latent / valid_counts.clamp(min=1.0)
             state = self.prior_state_fc(state_input)
             # state_ori = state
 

@@ -966,7 +966,7 @@ class AMPAgent(common_agent.CommonAgent):
                 vq_loss = extra_dict['loss']  # Include codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
-                # prior loss
+                # -----------  Prior Loss -----------
                 clip_embedding_window = batch_dict['clip_embedding_window']
                 freq_input = extra_dict['frequency'].detach()
                 target_state = extra_dict['state_after_quant'].detach()
@@ -983,10 +983,18 @@ class AMPAgent(common_agent.CommonAgent):
                 mse_per_sample = (prior_mu - target_manifold).pow(2).mean(dim=1)
                 prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
                 info_dict["kin_prior_loss"] = prior_loss
+                # -----------  Prior Semantic Loss -----------
+                is_valid = (batch_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6)
+                valid_mask = is_valid.unsqueeze(-1).float()
+                sum_latent = (batch_dict['clip_embedding_window'] * valid_mask).sum(dim=1)
+                valid_counts = valid_mask.sum(dim=1)  # Shape: [B, 1]
+                # calculated valid from clip window and obs, they should be same
+                assert torch.allclose(valid_len, valid_mask.sum(dim=1).squeeze(), atol=1e-6), "Values do not match!"
+                gt_valid_avg_clip = sum_latent / valid_counts.clamp(min=1.0)
 
                 prior_state_norm = torch.nn.functional.normalize(prior_info['prior_projected_embedding'], p=2, dim=1)
-                clip_norm = torch.nn.functional.normalize(batch_dict['clip_embedding_window'].mean(dim=1), p=2, dim=1)
-                loss_prior_semantic = 1.0 - (prior_state_norm * clip_norm).sum(dim=1).mean()
+                target_clip_norm = torch.nn.functional.normalize(gt_valid_avg_clip, p=2, dim=1)
+                loss_prior_semantic = 1.0 - (prior_state_norm * target_clip_norm).sum(dim=1).mean()
                 info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
 
                 # ----------- AR1 Loss-----------
@@ -1058,11 +1066,9 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_regu"] = regu_prior
 
                 # ----------- Semantic Alignment Loss -----------
-                target_clip_avg = batch_dict['clip_embedding_window'].mean(dim=1)
                 projected_clip_embedding = extra_dict['projected_clip_embedding']
                 state_norm = torch.nn.functional.normalize(projected_clip_embedding, p=2, dim=1)
-                clip_norm = torch.nn.functional.normalize(target_clip_avg, p=2, dim=1)
-                semantic_loss = 1.0 - (state_norm * clip_norm).sum(dim=1).mean()
+                semantic_loss = 1.0 - (state_norm * target_clip_norm).sum(dim=1).mean()
                 info_dict["kin_semantic"] = semantic_loss
                 # ----------- Loss Function -----------
                 kin_loss = (
