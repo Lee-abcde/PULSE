@@ -186,15 +186,19 @@ class AMPZBuilder(AMPBuilder):
             return y, signal
 
         def fft_with_nn(self, func, dim):
-            amp = torch.std(func, dim=dim) * np.sqrt(2)
-            amp = torch.ones_like(amp)
-            offset = torch.mean(func, dim=dim)
+            rfft = torch.fft.rfft(func, dim=dim)
+            magnitudes = rfft.abs()
+            spectrum = magnitudes[:, :, 1:]  # Spectrum without DC component
+            power = spectrum ** 2
 
-            rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
-            rfft = rfft.abs() ** 2
-            func = rfft
+            # Frequency
+            freq = torch.sum(self.freqs * power, dim=dim) / torch.sum(power, dim=dim)
 
-            freq = self.freq_fc(func).squeeze(-1)
+            # Amplitude
+            amp = 2 * torch.sqrt(torch.sum(power, dim=dim)) / self.time_range
+
+            # Offset
+            offset = rfft.real[:, :, 0] / self.time_range  # DC component
 
             return freq, amp, offset
 
@@ -203,8 +207,8 @@ class AMPZBuilder(AMPBuilder):
             f = f.unsqueeze(-1)
 
             y = latent - b
-            sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
-            sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
+            sx = torch.sum(y * torch.cos(self.tpi * f * self.analytical_phase_x_i), dim=2)
+            sy = torch.sum(y * torch.sin(self.tpi * f * self.analytical_phase_x_i), dim=2)
             if torch.any((f.squeeze(-1) == 0) & (sx == 0)):
                 print("!!! analytical_phase: 发现 f == 0 且 sx == 0. 这会导致 atan2(0, 0) -> nan 梯度 !!!")
             p = -torch.atan2(sy, sx + 1e-8) / self.tpi
@@ -495,7 +499,7 @@ class AMPZBuilder(AMPBuilder):
                         import ipdb;
                         ipdb.set_trace()
                         flags.text_change = False
-                    clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).repeat(7, 1).unsqueeze(0).cuda()
+                    clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).repeat(self.window_size, 1).unsqueeze(0).cuda()
                     prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
                     extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat']}
                     return prior_mu, extra_dict
@@ -957,8 +961,12 @@ class AMPZBuilder(AMPBuilder):
                 self.clip_dim = getattr(self, 'clip_dim', 512)
                 self.n_input_channels = self_obs_size + task_obs_size + self.clip_dim
                 self.n_latent_channels = self.embedding_size
-                self.window = getattr(self, 'window', 0.23)
-                self.time_range = self.window_size
+                self.fps = 30.
+                self.window = getattr(self, 'window', (self.window_size - 1) / self.fps) # window=1.0, 2.0
+                self.time_range = self.window_size # time_range: 31, 61, 121 ..
+                from torch.nn.parameter import Parameter
+                self.freqs = Parameter(torch.fft.rfftfreq(self.time_range)[1:] * self.time_range / self.window,
+                                       requires_grad=False)  # Remove DC frequency
                 self.n_timing_phases = getattr(self, 'n_timing_phases', 1)
 
                 self.intermediate_channels = getattr(self, 'intermediate_channels', 128)
@@ -973,6 +981,9 @@ class AMPZBuilder(AMPBuilder):
                 self.args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
                                                  dtype=np.float32)), requires_grad=False)
+                self.analytical_phase_x_i = nn.Parameter(
+                    torch.from_numpy(np.linspace(0, self.window, self.time_range,
+                                                 dtype=np.float32)), requires_grad=False).cuda()
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
                 normalizer = partial(LN_v3, keep_std=True)
