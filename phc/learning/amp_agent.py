@@ -940,16 +940,16 @@ class AMPAgent(common_agent.CommonAgent):
                     B, T = effective_mask.shape
                     gt_action_full = batch_dict['gt_action_window']
 
-                    alpha = 3.0  # 控制指数增长速度，越大越陡
+                    alpha = 3.0
                     time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
-                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # 减 1 保证最小权重 > 0
-                    time_weights = time_weights / time_weights.max()  # 归一化到 [0,1]
+                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # Decrease by 1 to ensure minimum weight > 0
+                    time_weights = time_weights / time_weights.max()  # Normalize to [0,1]
                     time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
                     weighted_mask = effective_mask.detach() * time_weights
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
                     T_total = effective_mask.shape[1]
-                    r = valid_len / T_total  # 比例 0~1
+                    r = valid_len / T_total
 
                     beta = 4.0
                     soft_w = torch.exp(beta * (r - 1.0))
@@ -958,12 +958,12 @@ class AMPAgent(common_agent.CommonAgent):
                     final_mask = weighted_mask * soft_w
 
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
-                # ----------- 动作重建损失 -----------
+                # ----------- Action Reconstruction Loss -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
                 kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
 
-                # ----------- 从模型中直接拿 VQ 损失 -----------
-                vq_loss = extra_dict['loss']  # 已包含 codebook + commitment
+                # ----------- VQ Loss -----------
+                vq_loss = extra_dict['loss']  # Include codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
                 # prior loss
@@ -989,7 +989,7 @@ class AMPAgent(common_agent.CommonAgent):
                 loss_prior_semantic = 1.0 - (prior_state_norm * clip_norm).sum(dim=1).mean()
                 info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
 
-                # ----------- AR1 连续性约束（可选）-----------
+                # ----------- AR1 Loss-----------
                 # ar1_prior = 0
                 # if humanoid_env.use_ar1_prior:
                 #     time_zs = extra_dict['quantized_z_out'].view(
@@ -1010,7 +1010,7 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
                 info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
 
-                # ----------- AR1 连续性约束 for state -----------
+                # ----------- AR1 Loss for state -----------
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
                 time_clip_wins = clip_embedding_window.view(self.minibatch_size // self.horizon_length,
@@ -1042,7 +1042,7 @@ class AMPAgent(common_agent.CommonAgent):
                     state_repulsion_loss = 0.0
                 info_dict["kin_state_repulsion"] = state_repulsion_loss
 
-                # ----------- AR1 连续性约束 for frequency (你要的代码) -----------
+                # ----------- AR1 Loss for frequency -----------
                 not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
                 time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
                                             self.horizon_length, -1)
@@ -1051,20 +1051,20 @@ class AMPAgent(common_agent.CommonAgent):
                 freq_diff[not_consecs] = 0
                 freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
                 info_dict["kin_freq_smooth"] = freq_smooth_loss
-                # # ----------- 正则项 -----------
+                # ----------- Regu Loss -----------
                 z_q = extra_dict['quantized_z_out']
                 z_b = extra_dict['z_before_quant']
                 regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
                 info_dict["kin_regu"] = regu_prior
 
-                # ----------- (Semantic Alignment Loss) -----------
+                # ----------- Semantic Alignment Loss -----------
                 target_clip_avg = batch_dict['clip_embedding_window'].mean(dim=1)
                 projected_clip_embedding = extra_dict['projected_clip_embedding']
                 state_norm = torch.nn.functional.normalize(projected_clip_embedding, p=2, dim=1)
                 clip_norm = torch.nn.functional.normalize(target_clip_avg, p=2, dim=1)
                 semantic_loss = 1.0 - (state_norm * clip_norm).sum(dim=1).mean()
                 info_dict["kin_semantic"] = semantic_loss
-                # ----------- 总损失函数 -----------
+                # ----------- Loss Function -----------
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
@@ -1085,11 +1085,11 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_action_loss"] = kin_action_loss
                 info_dict["kin_loss"] = kin_loss
                 if torch.isnan(kin_loss).any() or torch.isinf(kin_loss).any():
-                    print("!!! 致命错误: 训练损失（kin_loss）变成了 nan 或 inf !!!")
+                    print("Fatal error: Training loss (kin_loss) has become NaN or INF!!!")
                     print(f"kin_action_loss: {kin_action_loss}")
                     print(f"vq_loss: {vq_loss}")
                     import ipdb;
-                    ipdb.set_trace()  # 在这里停住
+                    ipdb.set_trace()
                 else:
                     self.model.a2c_network.quantizer.reinitialize()
 
