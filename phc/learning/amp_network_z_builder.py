@@ -405,6 +405,7 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == "vq_pae":
                 x = task_out_z.transpose(1, 2)  # (B, D, W)
                 text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
+                is_valid = (obs_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6).unsqueeze(1).float()
                 x_withText = torch.cat([x, text_feat], dim=1)
                 latent = self.z_encoder(x_withText)
                 # ---- Phase Prediction ----
@@ -431,7 +432,9 @@ class AMPZBuilder(AMPBuilder):
                 # print("Predicted text:", text)
                 ###############################################
                 fusion_latent = torch.cat([latent, text_feat], dim=1)
-                state_input = fusion_latent.mean(axis=-1)
+                sum_features = (fusion_latent * is_valid).sum(dim=-1)  # Shape: [2, 544]
+                valid_counts = is_valid.sum(dim=-1)  # Shape: [2, 1]
+                state_input = sum_features / valid_counts.clamp(min=1.0)
                 state = self.state_fc(state_input)
                 state_ori = state
 
