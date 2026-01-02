@@ -31,8 +31,8 @@ class MLP(nn.Module):
                 if bn:
                     self.layers.append(nn.BatchNorm1d(n_phase_channel))
                 self.layers.append(nn.LeakyReLU(negative_slope=0.2))
-            if last_activation:
-                self.layers.append(nn.ELU())
+        if last_activation:
+            self.layers.append(nn.ELU())
         self.layers = nn.Sequential(*self.layers)
 
     def forward(self, x):

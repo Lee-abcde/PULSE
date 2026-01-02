@@ -190,9 +190,10 @@ class AMPZBuilder(AMPBuilder):
             magnitudes = rfft.abs()
             spectrum = magnitudes[:, :, 1:]  # Spectrum without DC component
             power = spectrum ** 2
-
-            # Frequency
-            freq = torch.sum(self.freqs * power, dim=dim) / torch.sum(power, dim=dim)
+            power_input = power / (torch.sum(power, dim=-1, keepdim=True) + 1e-8)
+            learned_weights = self.freq_fc(power_input)  # Shape: [Batch, self.time_range//2 ]
+            # frequency
+            freq = torch.sum(self.freqs * learned_weights, dim=dim)
 
             # Amplitude
             amp = 2 * torch.sqrt(torch.sum(power, dim=dim)) / self.time_range
@@ -1007,9 +1008,11 @@ class AMPZBuilder(AMPBuilder):
                 self.phase_conv = nn.Sequential(nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
                 # ---- 3. Frequency MLP (from FFT) ----
-                fft_in_length = self.window_size // 2 + 1
-                # (Assuming MLP class is defined elsewhere)
-                self.freq_fc = MLP(self.pae_n_layers_fft, fft_in_length, 1, 1, bn=False, last_activation=True)
+                fft_in_length = self.window_size // 2
+                self.freq_fc = nn.Sequential(
+                    MLP(self.pae_n_layers_fft, fft_in_length, fft_in_length, 1, bn=False, last_activation=False),
+                    nn.Softmax(dim=-1)
+                )
 
                 # ---- 4. State MLP (from latent mean) ----
                 # Input is latent.mean(dim=-1), shape [B, pae_latent_channels]
