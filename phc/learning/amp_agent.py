@@ -940,12 +940,7 @@ class AMPAgent(common_agent.CommonAgent):
                     B, T = effective_mask.shape
                     gt_action_full = batch_dict['gt_action_window']
 
-                    alpha = 3.0
-                    time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
-                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # Decrease by 1 to ensure minimum weight > 0
-                    time_weights = time_weights / time_weights.max()  # Normalize to [0,1]
-                    time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
-                    weighted_mask = effective_mask.detach() * time_weights
+                    weighted_mask = effective_mask.detach()
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
                     T_total = effective_mask.shape[1]
@@ -1014,9 +1009,7 @@ class AMPAgent(common_agent.CommonAgent):
                 #     ar1_prior = torch.norm(error, dim=-1).mean()
                 #     info_dict["kin_ar1"] = ar1_prior
                 frequency = extra_dict['frequency']
-                freq_min = 1.5
-                freq_lower_bound_loss = torch.clamp(freq_min - frequency, min=0).mean()
-                info_dict["kin_freq_lower_bound"] = freq_lower_bound_loss
+                info_dict["kin_frequency_val"] = frequency.mean()
 
                 # ----------- AR1 Loss for state -----------
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
