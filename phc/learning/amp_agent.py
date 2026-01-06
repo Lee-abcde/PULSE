@@ -76,6 +76,8 @@ class AMPAgent(common_agent.CommonAgent):
             load_my_state_dict(self.model.state_dict(), checkpoint['model'])  # loads everything (model, std, ect.). that can be load from the last model.
             # self.value_mean_std # not freezing value function though.
         self.window_size = self.cfg.window_size
+        self.self_obs_len = 358
+        self.task_feat_dim = 576
         return
     
     def set_stats_weights(self, weights):
@@ -352,12 +354,15 @@ class AMPAgent(common_agent.CommonAgent):
         obs_dim = self.obs['obs'].shape[-1]
         clip_dim = self.clip_embedding.shape[-1]
         self.gt_action_dim = 69
+        assert obs_dim == self.self_obs_len + self.task_feat_dim
         if not hasattr(self, 'obs_window') or self.obs_window is None:
             self.obs, self.clip_embedding = self.env_reset(done_indices)
             self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
             self.obs_window[:, -1, :] = self.obs['obs']
-            self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
-            self.clip_embedding_window[:, -1, :] = self.clip_embedding
+            self.obs_window[:, :-1, :self.self_obs_len] = self.obs['obs'][:, :self.self_obs_len].unsqueeze(1).expand(-1, W-1, -1)
+            self.obs_window[:, :-1, self.self_obs_len + 363: self.self_obs_len + 432] = self.obs['obs'][:, 1:70].unsqueeze(1).expand(-1, W - 1, -1)
+            self.obs_window[:, :-1, self.self_obs_len + 432: self.self_obs_len + 576] = self.obs['obs'][:, 70:214].unsqueeze(1).expand(-1, W - 1, -1)
+            self.clip_embedding_window = self.clip_embedding.unsqueeze(1).expand(-1, W, -1).clone()
             self.gt_action_window = torch.zeros((self.num_actors, W, self.gt_action_dim), device=self.device)
 
         for n in range(self.horizon_length):
@@ -367,8 +372,14 @@ class AMPAgent(common_agent.CommonAgent):
             if len(done_indices) > 0:
                 self.obs_window[done_indices] = 0.0
                 self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
-                self.clip_embedding_window[done_indices] = 0.0
-                self.clip_embedding_window[done_indices, -1, :] = self.clip_embedding[done_indices]
+                self.obs_window[done_indices, :-1, :self.self_obs_len] = \
+                self.obs['obs'][done_indices, :self.self_obs_len].unsqueeze(1).expand(-1, W - 1, -1)
+                self.obs_window[done_indices, :-1, self.self_obs_len + 363: self.self_obs_len + 432] = \
+                    self.obs['obs'][done_indices, 1:70].unsqueeze(1).expand(-1, W - 1, -1)
+                self.obs_window[done_indices, :-1, self.self_obs_len + 432: self.self_obs_len + 576] = \
+                    self.obs['obs'][done_indices, 70:214].unsqueeze(1).expand(-1, W - 1, -1)
+                self.clip_embedding_window[done_indices] = \
+                    self.clip_embedding[done_indices].unsqueeze(1).expand(-1, W, -1)
                 # For check the correctness of "stand up" embedding
                 # print(self.clip_embedding)
                 self.gt_action_window[done_indices] = 0.0

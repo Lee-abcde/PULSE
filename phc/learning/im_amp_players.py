@@ -248,12 +248,26 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             W = self.window_size
             obs_dim = obs_dict['obs'].shape[-1]
             clip_dim = clip_embedding.shape[-1]
+            self.self_obs_len = 358
+            self.task_feat_dim = 576
             if not hasattr(self, 'obs_window') or self.obs_window is None:
                 obs_dict, clip_embedding = self.env_reset(done_indices)
                 self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
                 self.obs_window[:, -1, :] = obs_dict['obs']
-                self.clip_embedding_window = torch.zeros((batch_size, W, clip_dim), device=self.device)
-                self.clip_embedding_window[:, -1, :] = clip_embedding
+                # Fill Proprioception History
+                self.obs_window[:, :-1, :self.self_obs_len] = \
+                    obs_dict['obs'][:, :self.self_obs_len].unsqueeze(1).expand(-1, W - 1, -1)
+
+                # Fill Ref Pos History (Goal = Self)
+                self.obs_window[:, :-1, self.self_obs_len + 363: self.self_obs_len + 432] = \
+                    obs_dict['obs'][:, 1:70].unsqueeze(1).expand(-1, W - 1, -1)
+
+                # Fill Ref Rot History (Goal = Self)
+                self.obs_window[:, :-1, self.self_obs_len + 432: self.self_obs_len + 576] = \
+                    obs_dict['obs'][:, 70:214].unsqueeze(1).expand(-1, W - 1, -1)
+
+                # --- Init Clip Embedding Window (Replicate) ---
+                self.clip_embedding_window = clip_embedding.unsqueeze(1).expand(-1, W, -1).clone()
             with torch.no_grad():
                 for n in range(self.max_steps):
                     obs_dict, clip_embedding = self.env_reset(done_indices)
@@ -262,8 +276,21 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                             (not isinstance(done_indices, list) and done_indices.numel() > 0):
                         self.obs_window[done_indices] = 0.0
                         self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
-                        self.clip_embedding_window[done_indices] = 0.0
-                        self.clip_embedding_window[done_indices, -1, :] = clip_embedding[done_indices]
+                        # Fill Proprioception History
+                        self.obs_window[done_indices, :-1, :self.self_obs_len] = \
+                            obs_dict['obs'][done_indices, :self.self_obs_len].unsqueeze(1).expand(-1, W - 1, -1)
+
+                        # Fill Ref Pos History (Goal = Self)
+                        self.obs_window[done_indices, :-1, self.self_obs_len + 363: self.self_obs_len + 432] = \
+                            obs_dict['obs'][done_indices, 1:70].unsqueeze(1).expand(-1, W - 1, -1)
+
+                        # Fill Ref Rot History (Goal = Self)
+                        self.obs_window[done_indices, :-1, self.self_obs_len + 432: self.self_obs_len + 576] = \
+                            obs_dict['obs'][done_indices, 70:214].unsqueeze(1).expand(-1, W - 1, -1)
+
+                        # Reset Clip Embedding (Replicate)
+                        self.clip_embedding_window[done_indices] = \
+                            clip_embedding[done_indices].unsqueeze(1).expand(-1, W, -1)
                     if COLLECT_Z: z = self.get_z(obs_dict)
                         
 
