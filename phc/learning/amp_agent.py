@@ -358,6 +358,7 @@ class AMPAgent(common_agent.CommonAgent):
             self.obs_window[:, -1, :] = self.obs['obs']
             self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
             self.clip_embedding_window[:, -1, :] = self.clip_embedding
+            self.gt_action_window = torch.zeros((self.num_actors, W, self.gt_action_dim), device=self.device)
 
         for n in range(self.horizon_length):
 
