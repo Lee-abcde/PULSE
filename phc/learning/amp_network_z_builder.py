@@ -983,7 +983,7 @@ class AMPZBuilder(AMPBuilder):
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(
-                    torch.from_numpy(np.linspace(-self.window, 0, self.time_range,
+                    torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
                                                  dtype=np.float32)), requires_grad=False)
                 self.analytical_phase_x_i = nn.Parameter(
                     torch.from_numpy(np.linspace(0, self.window, self.time_range,
