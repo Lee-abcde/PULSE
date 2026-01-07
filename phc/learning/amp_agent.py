@@ -948,19 +948,11 @@ class AMPAgent(common_agent.CommonAgent):
                     weighted_mask = effective_mask.detach() * time_weights
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
-                    T_total = effective_mask.shape[1]
-                    r = valid_len / T_total
-
-                    beta = 4.0
-                    soft_w = torch.exp(beta * (r - 1.0))
-                    soft_w = soft_w.clamp(min=1e-4, max=1.0)
-                    soft_w = soft_w.view(B, 1)  # (B,1)
-                    final_mask = weighted_mask * soft_w
 
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- Action Reconstruction Loss -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * final_mask.detach()).sum() / weighted_mask.sum()
+                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
 
                 # ----------- VQ Loss -----------
                 vq_loss = extra_dict['loss']  # Include codebook + commitment
@@ -981,7 +973,7 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_prior_state_loss"] = loss_prior_state
 
                 mse_per_sample = (prior_mu - target_manifold).pow(2).mean(dim=1)
-                prior_loss = (mse_per_sample * final_mask).sum() / (weighted_mask.sum() + 1e-8)
+                prior_loss = (mse_per_sample * weighted_mask).sum() / (weighted_mask.sum() + 1e-8)
                 info_dict["kin_prior_loss"] = prior_loss
                 # -----------  Prior Semantic Loss -----------
                 is_valid = (batch_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6)
