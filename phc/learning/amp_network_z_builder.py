@@ -193,8 +193,9 @@ class AMPZBuilder(AMPBuilder):
 
             rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
             rfft = rfft.abs() ** 2
-            spectrum = rfft[..., 1:]
-            freq = self.freq_fc(spectrum).squeeze(-1)
+            func = rfft
+
+            freq = self.freq_fc(func).squeeze(-1)
 
             return freq, amp, offset
 
@@ -1003,7 +1004,7 @@ class AMPZBuilder(AMPBuilder):
                 self.phase_conv = nn.Sequential(nn.Conv1d(self.n_latent_channels, self.n_timing_phases, self.pae_kernel_size, padding='same'))
 
                 # ---- 3. Frequency MLP (from FFT) ----
-                fft_in_length = self.window_size // 2
+                fft_in_length = self.window_size // 2 + 1
                 self.freq_fc = MLP(self.pae_n_layers_fft, fft_in_length, 1, 1, bn=False, last_activation=True)
 
                 # ---- 4. State MLP (from latent mean) ----
