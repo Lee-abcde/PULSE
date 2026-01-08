@@ -1031,14 +1031,14 @@ class AMPAgent(common_agent.CommonAgent):
                 state_smooth_loss = torch.norm(smooth_diff, dim=-1).mean()
                 info_dict["kin_state_smooth"] = state_smooth_loss
                 # handling negative case
-                repulsion_mask = (~is_same_semantic) & (~starter_mask)
-                repulse_diff = state_diff[repulsion_mask]
-                if repulse_diff.shape[0] > 0:
-                    boundary_dist = torch.norm(repulse_diff, dim=-1)
-                    state_repulsion_loss = torch.exp(-boundary_dist).mean()
-                else:
-                    state_repulsion_loss = 0.0
-                info_dict["kin_state_repulsion"] = state_repulsion_loss
+                # repulsion_mask = (~is_same_semantic) & (~starter_mask)
+                # repulse_diff = state_diff[repulsion_mask]
+                # if repulse_diff.shape[0] > 0:
+                #     boundary_dist = torch.norm(repulse_diff, dim=-1)
+                #     state_repulsion_loss = torch.exp(-boundary_dist).mean()
+                # else:
+                #     state_repulsion_loss = 0.0
+                # info_dict["kin_state_repulsion"] = state_repulsion_loss
 
                 # ----------- AR1 Loss for frequency -----------
                 not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
@@ -1066,7 +1066,7 @@ class AMPAgent(common_agent.CommonAgent):
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
-                        + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
+                        # + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
                         # + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
