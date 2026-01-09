@@ -937,20 +937,16 @@ class AMPAgent(common_agent.CommonAgent):
             elif humanoid_env.z_type == "vq_pae":
                 with torch.no_grad():
                     effective_mask = self.calculate_effective_mask(batch_dict['obs_orig'])
+                    B, T = effective_mask.shape
                     gt_action_full = batch_dict['gt_action_window']
 
-                    K = 7
-                    mask_window = torch.zeros_like(effective_mask)
-                    mask_window[:, -K:] = 1.0
-                    effective_mask_short = effective_mask * mask_window
-
                     alpha = 3.0
-                    window_steps = torch.arange(1, K + 1, device=effective_mask.device)
-                    window_weights = torch.exp(alpha * (window_steps.float() / K)) - 1.0
-                    window_weights = window_weights / window_weights.max()
-                    time_weights = torch.zeros_like(effective_mask)
-                    time_weights[:, -K:] = window_weights.unsqueeze(0)
-                    weighted_mask = effective_mask_short.detach() * time_weights
+                    time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
+                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # Decrease by 1 to ensure minimum weight > 0
+                    time_weights = time_weights / time_weights.max()  # Normalize to [0,1]
+                    time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
+                    weighted_mask = effective_mask.detach() * time_weights
+
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
 
