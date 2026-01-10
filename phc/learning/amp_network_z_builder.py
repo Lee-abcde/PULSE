@@ -404,6 +404,10 @@ class AMPZBuilder(AMPBuilder):
                 x = task_out_z.transpose(1, 2)  # (B, D, W)
                 text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
                 is_valid = (obs_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6).unsqueeze(1).float()
+                temporal_mask = torch.zeros_like(is_valid)
+                temporal_mask[..., -self.window_size:] = 1.0
+                is_valid = is_valid * temporal_mask
+
                 x_withText = torch.cat([x, text_feat], dim=1)
                 latent = self.z_encoder(x_withText)
                 # ---- Phase Prediction ----
@@ -569,6 +573,9 @@ class AMPZBuilder(AMPBuilder):
         def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
             is_valid = (clip_embedding_window.abs().sum(dim=-1) > 1e-6)
             valid_mask = is_valid.unsqueeze(1).float()
+            temporal_mask = torch.zeros_like(valid_mask)
+            temporal_mask[..., -self.window_size:] = 1.0
+            valid_mask = valid_mask * temporal_mask
 
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
             if self.training:
