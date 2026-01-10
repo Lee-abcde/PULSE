@@ -946,14 +946,14 @@ class AMPAgent(common_agent.CommonAgent):
                     time_weights = time_weights / time_weights.max()  # Normalize to [0,1]
                     time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
                     weighted_mask = effective_mask.detach() * time_weights
-
+                    weighted_mask = weighted_mask[:,-7:]
 
                     valid_len = effective_mask.sum(dim=1)  # (B,)
 
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- Action Reconstruction Loss -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
+                kin_action_loss = ((pred_action - gt_action_full[:,-7:,]).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
 
                 # ----------- VQ Loss -----------
                 vq_loss = extra_dict['loss']  # Include codebook + commitment
