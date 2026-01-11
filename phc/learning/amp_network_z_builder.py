@@ -106,6 +106,25 @@ class AMPZBuilder(AMPBuilder):
             extra_dict = {}
             B, N = task_out_z.shape
             if self.z_type == 'vae':
+                ###############################################
+                # Check Text label
+                ###############################################
+                # clip_embedding_cur = obs_dict['clip_embedding']
+                #
+                # def find_exact_embedding(target_emb, master_embeddings, master_texts):
+                #
+                #     target_emb = target_emb.view(1, -1)  # Make it (1, 512)
+                #     equality_mask = torch.eq(target_emb, master_embeddings)
+                #     match_index = torch.all(equality_mask, dim=1)
+                #     indices = torch.nonzero(match_index, as_tuple=True)[0]
+                #
+                #     if indices.numel() > 0:
+                #         first_match_index = indices[0].item()
+                #         return master_texts[first_match_index]
+                #     else:
+                #         return None
+                # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
+                # print("Predicted text:", text)
                 self.vae_mu = vae_mu = self.z_mu(task_out_z)
                 self.vae_log_var = vae_log_var = self.z_logvar(task_out_z)
                 
@@ -126,6 +145,28 @@ class AMPZBuilder(AMPBuilder):
                     
                 if flags.debug:
                     if self.use_vae_prior or self.use_vae_fixed_prior:
+                        ###############################################
+                        # Set Text label
+                        ###############################################
+                        # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
+                        #     embedding = clip_embedding_dict.get(key)
+                        #
+                        #     if embedding is None:
+                        #         print("key not found")
+                        #         import ipdb;
+                        #         ipdb.set_trace()
+                        #
+                        #     if isinstance(embedding, np.ndarray):
+                        #         embedding = torch.from_numpy(embedding).float()
+                        #     elif isinstance(embedding, (list, tuple)):
+                        #         embedding = torch.tensor(embedding, dtype=torch.float32)
+                        #
+                        #     return embedding
+                        #
+                        # clip_embedding = get_clip_embedding("walk", self.clip_embedding_dict).unsqueeze(
+                        #     0).cuda()
+                        # obs_dict['clip_embedding'] = clip_embedding
+
                         prior_mu, prior_logvar = self.compute_prior(obs_dict)
                         # if flags.trigger_input:
                         #     ### Trigger input
@@ -213,6 +254,9 @@ class AMPZBuilder(AMPBuilder):
                     # import ipdb; ipdb.set_trace()
                     # self.debug_idxes =  self.embedding_size//self.embedding_partion, self.embedding_partion
 
+                    ###############################################
+                    # Set Text label
+                    ###############################################
                     # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
                     #     embedding = clip_embedding_dict.get(key)
                     #
@@ -526,6 +570,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
+                    text_feat = self.text_adapter(obs_dict['clip_embedding'])
                     actor_input = torch.cat([self_obs, z_out, text_feat], dim=-1)
 
                 a_out = self.actor_mlp(actor_input)
