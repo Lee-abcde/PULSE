@@ -408,6 +408,9 @@ class AMPZBuilder(AMPBuilder):
                 temporal_mask[..., -self.window_size:] = 1.0
                 is_valid = is_valid * temporal_mask
 
+                x = x[..., -self.window_size:]
+                text_feat = text_feat[..., -self.window_size:]
+                is_valid = is_valid[..., -self.window_size:]
                 x_withText = torch.cat([x, text_feat], dim=1)
                 latent = self.z_encoder(x_withText)
                 # ---- Phase Prediction ----
