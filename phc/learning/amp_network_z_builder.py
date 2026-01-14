@@ -43,7 +43,7 @@ class AMPZBuilder(AMPBuilder):
             self.z_all = self.task_obs_size_detail.get("z_all", False)
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
-            self.window_size = 7
+            self.window_size = kwargs['window_size']
             self.top_phase = 1.0
             self.bottom_phase = 0.0
             self.debug_index = 23
@@ -213,7 +213,6 @@ class AMPZBuilder(AMPBuilder):
 
         def pae(self, latent):
             latent1d = self.phase_conv(latent)
-            latent1d = latent1d[..., -self.window_size:]
             f, a, b = self.fft_with_nn(latent1d, dim=2)
             p = self.analytical_phase(latent1d, f, b)
             return f, a, b, p
@@ -404,13 +403,6 @@ class AMPZBuilder(AMPBuilder):
                 x = task_out_z.transpose(1, 2)  # (B, D, W)
                 text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
                 is_valid = (obs_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6).unsqueeze(1).float()
-                temporal_mask = torch.zeros_like(is_valid)
-                temporal_mask[..., -self.window_size:] = 1.0
-                is_valid = is_valid * temporal_mask
-
-                x = x[..., -self.window_size:]
-                text_feat = text_feat[..., -self.window_size:]
-                is_valid = is_valid[..., -self.window_size:]
                 x_withText = torch.cat([x, text_feat], dim=1)
                 latent = self.z_encoder(x_withText)
                 # ---- Phase Prediction ----
@@ -576,9 +568,6 @@ class AMPZBuilder(AMPBuilder):
         def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
             is_valid = (clip_embedding_window.abs().sum(dim=-1) > 1e-6)
             valid_mask = is_valid.unsqueeze(1).float()
-            temporal_mask = torch.zeros_like(valid_mask)
-            temporal_mask[..., -self.window_size:] = 1.0
-            valid_mask = valid_mask * temporal_mask
 
             self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
             if self.training:
@@ -597,7 +586,6 @@ class AMPZBuilder(AMPBuilder):
 
             loss, state, _, _ = self.quantizer(state, freeze_codebook=True)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
-            prior_latent1d = prior_latent1d[..., -self.window_size:]
             offset = torch.mean(prior_latent1d, dim=2)
             p = self.analytical_phase(prior_latent1d, frequency, offset)
             angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
@@ -816,7 +804,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    actor_input = torch.cat([self_obs[:, -self.window_size:, :], z_out.permute(0, 2, 1), extra_dict['adapted_clip_embedding'].permute(0, 2, 1)[:, -self.window_size:, :]], dim=-1) # [B, Window, Feature]
+                    actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1), extra_dict['adapted_clip_embedding'].permute(0, 2, 1)], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
                 
