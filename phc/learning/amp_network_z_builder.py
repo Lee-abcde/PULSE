@@ -518,11 +518,17 @@ class AMPZBuilder(AMPBuilder):
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
                 # task_out_proj = self.deconvs(y)
                 projected_clip_embedding = self.state_proj_head(state)
+                # encode text using phase
+                phase_exp = torch.stack([torch.sin(angles), torch.cos(angles)], dim=1)
+                text_exp = text_feat.unsqueeze(1)
+                text_phase_feat = (phase_exp * text_exp).reshape(
+                    text_feat.size(0), -1, text_feat.size(2)
+                )
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
                               "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori,
                               "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold,
                               'projected_clip_embedding': projected_clip_embedding, "perplexity": perplexity,
-                              'adapted_clip_embedding': text_feat}
+                              'adapted_clip_embedding': text_feat, "phase_text_feat": text_phase_feat}
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -804,7 +810,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1), extra_dict['adapted_clip_embedding'].permute(0, 2, 1)], dim=-1) # [B, Window, Feature]
+                    actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1), extra_dict['phase_text_feat'].permute(0, 2, 1)], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
                 

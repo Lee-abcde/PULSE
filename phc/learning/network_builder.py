@@ -243,7 +243,7 @@ class A2CBuilder(NetworkBuilder):
                         self.layer_norm = torch.nn.LayerNorm(self.rnn_units)
             self.clip_embedding_size = 512
             mlp_args = {'input_size': in_mlp_shape, 'units': self.units, 'activation': self.activation, 'norm_func_name': self.normalization, 'dense_func': torch.nn.Linear, 'd2rl': self.is_d2rl, 'norm_only_first_layer': self.norm_only_first_layer}
-            actor_mlp_args = {'input_size': in_mlp_shape + self.clip_embedding_size, 'units': self.units,
+            actor_mlp_args = {'input_size': in_mlp_shape + 2 * self.clip_embedding_size, 'units': self.units,
                         'activation': self.activation, 'norm_func_name': self.normalization,
                         'dense_func': torch.nn.Linear, 'd2rl': self.is_d2rl,
                         'norm_only_first_layer': self.norm_only_first_layer}
