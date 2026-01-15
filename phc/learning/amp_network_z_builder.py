@@ -501,7 +501,7 @@ class AMPZBuilder(AMPBuilder):
                         flags.text_change = False
                     clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).repeat(self.window_size, 1).unsqueeze(0).cuda()
                     prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
-                    extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat']}
+                    extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat'], 'phase_text_feat': prior_info['phase_text_feat']}
                     return prior_mu, extra_dict
 
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
@@ -598,11 +598,19 @@ class AMPZBuilder(AMPBuilder):
 
             prior_manifold, _ = self.get_phase_manifold(state, angles)
             prior_projected_embedding = self.state_proj_head(state)
+
+            # encode text using phase
+            phase_exp = torch.stack([torch.sin(angles), torch.cos(angles)], dim=1)
+            text_exp = text_feat.unsqueeze(1)
+            text_phase_feat = (phase_exp * text_exp).reshape(
+                text_feat.size(0), -1, text_feat.size(2)
+            )
             return prior_manifold, {
                 "state": state,
                 "prior_projected_embedding": prior_projected_embedding,
                 "vq_loss": loss,
                 "prior_adapted_text_feat": text_feat,
+                'phase_text_feat': text_phase_feat
             }
 
         def reparameterize(self, mu, logvar):
