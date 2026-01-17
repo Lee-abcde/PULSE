@@ -186,16 +186,20 @@ class AMPZBuilder(AMPBuilder):
             return y, signal
 
         def fft_with_nn(self, func, dim):
-            amp = torch.std(func, dim=dim) * np.sqrt(2)
-            amp = torch.ones_like(amp)
-            offset = torch.mean(func, dim=dim)
+            rfft = torch.fft.rfft(func, dim=dim)
+            magnitudes = rfft.abs()
+            spectrum = magnitudes[:, :, 1:]  # Spectrum without DC component
+            power = spectrum ** 2
+
+            # Frequency
+            freq = torch.sum(self.freqs * power, dim=dim) / torch.sum(power, dim=dim)
 
 
-            rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
-            rfft = rfft.abs() ** 2
-            func = rfft
+            # Amplitude
+            amp = 2 * torch.sqrt(torch.sum(power, dim=dim)) / self.time_range
 
-            freq = self.freq_fc(func).squeeze(-1)
+            # Offset
+            offset = rfft.real[:, :, 0] / self.time_range  # DC component
 
             return freq, amp, offset
 
