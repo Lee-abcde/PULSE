@@ -162,6 +162,10 @@ class BaseTask():
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "show_progress")
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_O, "change_color")
 
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_7, "reset_index")  # add here
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_UP, "index_up")  # add here
+            self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_DOWN, "index_down")  # add here
+
             self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_SPACE, "PAUSE")
 
             # set the camera position based on up axis
@@ -403,6 +407,15 @@ class BaseTask():
                 elif evt.action == "change_color" and evt.value > 0:
                     self.change_char_color()
                     print("Change character color")
+
+                elif evt.action == "reset_index" and evt.value > 0:
+                    flags.reset_index = not flags.reset_index
+                    print("reset_index:", flags.reset_index)
+                elif evt.action == "index_up" and evt.value > 0:
+                    flags.index_up = not flags.index_up
+                elif evt.action == "index_down" and evt.value > 0:
+                    flags.index_down = not flags.index_down
+
             
             if self.recording_state_change:
                 if not self.recording:

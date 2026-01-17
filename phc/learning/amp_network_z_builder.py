@@ -92,6 +92,9 @@ class AMPZBuilder(AMPBuilder):
             #
             # self.master_embeddings = torch.stack(all_embeddings)
             # self.master_texts = all_texts
+
+            self.vae_mu_history = []
+            self.replay_idx = 0
             self.actor_mlp
 
         def load(self, params):
@@ -138,49 +141,83 @@ class AMPZBuilder(AMPBuilder):
                     
                 if flags.test:
                     task_out_proj = vae_mu
+                    if len(self.vae_mu_history) < 120:
+                        self.vae_mu_history.append(vae_mu[0].detach().clone())
+                        if len(self.vae_mu_history) == 120:
+                            print("Recorded 120 frames of vae_mu.")
                     
                 if flags.trigger_input:
                     flags.trigger_input = False
                     flags.debug = not flags.debug
                     
                 if flags.debug:
-                    if self.use_vae_prior or self.use_vae_fixed_prior:
-                        ###############################################
-                        # Set Text label
-                        ###############################################
-                        # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
-                        #     embedding = clip_embedding_dict.get(key)
-                        #
-                        #     if embedding is None:
-                        #         print("key not found")
-                        #         import ipdb;
-                        #         ipdb.set_trace()
-                        #
-                        #     if isinstance(embedding, np.ndarray):
-                        #         embedding = torch.from_numpy(embedding).float()
-                        #     elif isinstance(embedding, (list, tuple)):
-                        #         embedding = torch.tensor(embedding, dtype=torch.float32)
-                        #
-                        #     return embedding
-                        #
-                        # clip_embedding = get_clip_embedding("walk", self.clip_embedding_dict).unsqueeze(
-                        #     0).cuda()
-                        # obs_dict['clip_embedding'] = clip_embedding
+                    # --- Replay Logic ---
+                    if hasattr(self, 'vae_mu_history') and len(self.vae_mu_history) > 0:
+                        # Allow user to input index via console or use a pre-set index
+                        # For interactive debug, you might use input() but it pauses execution.
+                        # Alternatively, use a flag or cycle through them.
+                        # Here is an example using a fixed index or cycling:
 
-                        prior_mu, prior_logvar = self.compute_prior(obs_dict)
-                        # if flags.trigger_input:
-                        #     ### Trigger input
-                        #     task_out_proj[:], noise = self.reparameterize(prior_mu, prior_logvar) ; print("\n   debugging",  end='')
-                        #     flags.trigger_input = False
-                        # else:
-                        #     task_out_proj[:] = prior_mu
-                        # task_out_proj[:], noise = self.reparameterize(prior_mu, torch.ones_like(prior_logvar) * -2.3 ) ; print("\r  debugging with prior using -2.3 std.",  end='')
-                        # task_out_proj[:], noise = self.reparameterize(prior_mu, torch.ones_like(prior_logvar) * -1.5 ) ; print("\r  debugging with prior using -1.5 std.",  end='')
-                        task_out_proj[:], noise = self.reparameterize(prior_mu, prior_logvar ) ; print(f"\r prior_mu {prior_mu.abs().max():.3f} {prior_logvar.exp().max():.3f}",  end='')
-                        # task_out_proj[:] = torch.randn_like(vae_mu) ; print("\r   debugging randn",  end='')
-                        enhance = 0
+                        # Example 1: Use a specific index (e.g., set via a global flag or property)
+                        # replay_idx = flags.replay_idx if hasattr(flags, 'replay_idx') else 0
+
+                        # Example 2: Cycle through recorded frames or hold last one
+                        if flags.reset_index:
+                            import ipdb; ipdb.set_trace()
+                            flags.reset_index=False
+                        if flags.index_up:
+                            self.replay_idx += 1
+                            flags.index_up = False
+                        elif flags.index_down:
+                            self.replay_idx -= 1
+                            flags.index_down = False
+
+                        print(f"\r Replaying vae_mu frame: {self.replay_idx}", end='')
+
+                        # Replace the task_out_proj with the recorded vae_mu
+                        # We expand it to match the batch size B
+                        recorded_mu = self.vae_mu_history[self.replay_idx]
+                        task_out_proj[:] = recorded_mu.unsqueeze(0).expand(B, -1)
+
+                        enhance = 0  # variable from your original code
                     else:
-                        task_out_proj[:] = torch.randn_like(vae_mu) ; print("\r   debugging",  end='')
+                        if self.use_vae_prior or self.use_vae_fixed_prior:
+                            ###############################################
+                            # Set Text label
+                            ###############################################
+                            # def get_clip_embedding(key: str, clip_embedding_dict) -> torch.Tensor:
+                            #     embedding = clip_embedding_dict.get(key)
+                            #
+                            #     if embedding is None:
+                            #         print("key not found")
+                            #         import ipdb;
+                            #         ipdb.set_trace()
+                            #
+                            #     if isinstance(embedding, np.ndarray):
+                            #         embedding = torch.from_numpy(embedding).float()
+                            #     elif isinstance(embedding, (list, tuple)):
+                            #         embedding = torch.tensor(embedding, dtype=torch.float32)
+                            #
+                            #     return embedding
+                            #
+                            # clip_embedding = get_clip_embedding("walk", self.clip_embedding_dict).unsqueeze(
+                            #     0).cuda()
+                            # obs_dict['clip_embedding'] = clip_embedding
+
+                            prior_mu, prior_logvar = self.compute_prior(obs_dict)
+                            # if flags.trigger_input:
+                            #     ### Trigger input
+                            #     task_out_proj[:], noise = self.reparameterize(prior_mu, prior_logvar) ; print("\n   debugging",  end='')
+                            #     flags.trigger_input = False
+                            # else:
+                            #     task_out_proj[:] = prior_mu
+                            # task_out_proj[:], noise = self.reparameterize(prior_mu, torch.ones_like(prior_logvar) * -2.3 ) ; print("\r  debugging with prior using -2.3 std.",  end='')
+                            # task_out_proj[:], noise = self.reparameterize(prior_mu, torch.ones_like(prior_logvar) * -1.5 ) ; print("\r  debugging with prior using -1.5 std.",  end='')
+                            task_out_proj[:], noise = self.reparameterize(prior_mu, prior_logvar ) ; print(f"\r prior_mu {prior_mu.abs().max():.3f} {prior_logvar.exp().max():.3f}",  end='')
+                            # task_out_proj[:] = torch.randn_like(vae_mu) ; print("\r   debugging randn",  end='')
+                            enhance = 0
+                        else:
+                            task_out_proj[:] = torch.randn_like(vae_mu) ; print("\r   debugging",  end='')
                         
                 if self.use_vae_sphere_posterior:
                     task_out_proj = project_to_norm(task_out_proj, norm=self.embedding_norm, z_type="sphere")
