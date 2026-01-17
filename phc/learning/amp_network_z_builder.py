@@ -204,8 +204,8 @@ class AMPZBuilder(AMPBuilder):
             f = f.unsqueeze(-1)
 
             y = latent - b
-            sx = torch.sum(y * torch.cos(self.tpi * f * self.analytical_phase_x_i), dim=2)
-            sy = torch.sum(y * torch.sin(self.tpi * f * self.analytical_phase_x_i), dim=2)
+            sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
+            sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
             if torch.any((f.squeeze(-1) == 0) & (sx == 0)):
                 print("!!! analytical_phase: 发现 f == 0 且 sx == 0. 这会导致 atan2(0, 0) -> nan 梯度 !!!")
             p = -torch.atan2(sy, sx + 1e-8) / self.tpi
@@ -997,11 +997,8 @@ class AMPZBuilder(AMPBuilder):
 
                 self.tpi = nn.Parameter(torch.tensor(2 * np.pi, dtype=torch.float32), requires_grad=False)
                 self.args = nn.Parameter(
-                    torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
-                                                 dtype=np.float32)), requires_grad=False)
-                self.analytical_phase_x_i = nn.Parameter(
                     torch.from_numpy(np.linspace(0, self.window, self.time_range,
-                                                 dtype=np.float32)), requires_grad=False).cuda()
+                                                 dtype=np.float32)), requires_grad=False)
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
                 normalizer = partial(LN_v3, keep_std=True)
