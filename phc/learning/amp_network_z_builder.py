@@ -186,20 +186,15 @@ class AMPZBuilder(AMPBuilder):
             return y, signal
 
         def fft_with_nn(self, func, dim):
-            rfft = torch.fft.rfft(func, dim=dim)
-            magnitudes = rfft.abs()
-            spectrum = magnitudes[:, :, 1:]  # Spectrum without DC component
-            power = spectrum ** 2
+            amp = torch.std(func, dim=dim) * np.sqrt(2)
+            amp = torch.ones_like(amp)
+            offset = torch.mean(func, dim=dim)
 
-            # Frequency
-            freq = torch.sum(self.freqs * power, dim=dim) / torch.sum(power, dim=dim)
+            rfft = torch.fft.rfft(func, dim=dim) / self.time_range * 2
+            rfft = rfft.abs() ** 2
+            func = rfft
 
-
-            # Amplitude
-            amp = 2 * torch.sqrt(torch.sum(power, dim=dim)) / self.time_range
-
-            # Offset
-            offset = rfft.real[:, :, 0] / self.time_range  # DC component
+            freq = self.freq_fc(func).squeeze(-1)
 
             return freq, amp, offset
 
@@ -404,11 +399,9 @@ class AMPZBuilder(AMPBuilder):
             elif self.z_type == "sphere":
                 task_out_proj = project_to_norm(task_out_z, norm=self.embedding_norm, z_type=self.z_type)
             elif self.z_type == "vq_pae":
-                x = task_out_z.transpose(1, 2)  # (B, D, W)
-                text_feat = self.text_adapter(obs_dict['clip_embedding_window']).permute(0, 2, 1)
-                is_valid = (obs_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6).unsqueeze(1).float()
-                x_withText = torch.cat([x, text_feat], dim=1)
-                latent = self.z_encoder(x_withText)
+                kinematic_obs_window = obs_dict['kinematic_obs_window'].transpose(1, 2)
+                text_feat = self.text_adapter(obs_dict['clip_embedding'])
+                latent = self.z_encoder(kinematic_obs_window)
                 # ---- Phase Prediction ----
                 f, a, b, p = self.pae(latent)
 
@@ -432,10 +425,7 @@ class AMPZBuilder(AMPBuilder):
                 # text = find_exact_embedding(clip_embedding_cur, self.master_embeddings, self.master_texts)
                 # print("Predicted text:", text)
                 ###############################################
-                fusion_latent = torch.cat([latent, text_feat], dim=1)
-                sum_features = (fusion_latent * is_valid).sum(dim=-1)  # Shape: [2, 544]
-                valid_counts = is_valid.sum(dim=-1)  # Shape: [2, 1]
-                state_input = sum_features / valid_counts.clamp(min=1.0)
+                state_input = latent.mean(axis=-1)
                 state = self.state_fc(state_input)
                 state_ori = state
 
@@ -520,19 +510,14 @@ class AMPZBuilder(AMPBuilder):
                 y, signal = self.get_phase_manifold(state, angles)
                 manifold = y
                 manifold_ori, _ = self.get_phase_manifold(state_ori, angles)
-                # task_out_proj = self.deconvs(y)
-                projected_clip_embedding = self.state_proj_head(state)
-                # encode text using phase
-                phase_exp = torch.stack([torch.sin(angles), torch.cos(angles)], dim=1)
-                text_exp = text_feat.unsqueeze(1)
-                text_phase_feat = (phase_exp * text_exp).reshape(
-                    text_feat.size(0), -1, text_feat.size(2)
-                )
+                recon_kin_obs_window = self.deconvs(y)
+
                 extra_dict = {"loss": loss, "indexes": indexes, "z_before_quant": manifold_ori[..., -1],
                               "quantized_z_out": manifold[..., -1], "state_before_quant": state_ori,
                               "state_after_quant": state, "frequency": f, "full_quantized_z_out": manifold,
-                              'projected_clip_embedding': projected_clip_embedding, "perplexity": perplexity,
-                              'adapted_clip_embedding': text_feat, "phase_text_feat": text_phase_feat}
+                              "perplexity": perplexity,'recon_kin_obs_window': recon_kin_obs_window,
+                              'adapted_clip_embedding': text_feat,
+                              }
                 return manifold, extra_dict
 
             # print(task_out_proj.max(), task_out_proj.min())
@@ -822,7 +807,8 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    actor_input = torch.cat([self_obs, z_out.permute(0, 2, 1), extra_dict['phase_text_feat'].permute(0, 2, 1)], dim=-1) # [B, Window, Feature]
+                    central_frame = z_out.shape[-1] // 2   # 61 // 2 = 30
+                    actor_input = torch.cat([self_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
                 
@@ -981,7 +967,7 @@ class AMPZBuilder(AMPBuilder):
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
                 self.clip_dim = getattr(self, 'clip_dim', 512)
-                self.n_input_channels = self_obs_size + task_obs_size + self.clip_dim
+                self.n_input_channels = self_obs_size
                 self.n_latent_channels = self.embedding_size
                 self.fps = 30.
                 self.window = getattr(self, 'window', (self.window_size - 1) / self.fps) # window=1.0, 2.0
@@ -1029,21 +1015,21 @@ class AMPZBuilder(AMPBuilder):
                 self.text_adapter = nn.Sequential(
                     nn.Linear(self.clip_dim, self.clip_dim),  # [B, 7, 512] -> [B, 7, 512]
                 )
-                n_channels_state_mlp = [self.n_latent_channels + self.clip_dim] + [self.num_embed] * n_layers_state
+                n_channels_state_mlp = [self.n_latent_channels] + [self.num_embed] * n_layers_state
                 self.state_fc = MLPChannels(n_channels_state_mlp, bn=False)
                 self.state_proj_head = nn.Linear(self.num_embed, 512)
                 # ---- 5. Vector Quantizer ----
                 self.quantizer = VectorQuantizer(self.dict_size, self.num_embed, 0.25)
 
-                # self.deconvs = []
-                # decoder_channels = encoder_channels[::-1]
-                # for i in range(self.pae_n_layers):
-                #     self.deconvs.append(nn.Conv1d(decoder_channels[i], decoder_channels[i + 1],
-                #                                   self.pae_kernel_size, padding='same'))
-                #     if i != self.pae_n_layers - 1:
-                #         self.deconvs.append(normalizer(self.window_size))  # Use window_size
-                #         self.deconvs.append(nn.ELU())
-                # self.deconvs = nn.Sequential(*self.deconvs)
+                self.deconvs = []
+                decoder_channels = encoder_channels[::-1]
+                for i in range(self.pae_n_layers):
+                    self.deconvs.append(nn.Conv1d(decoder_channels[i], decoder_channels[i + 1],
+                                                  self.pae_kernel_size, padding='same'))
+                    if i != self.pae_n_layers - 1:
+                        self.deconvs.append(normalizer(self.window_size))  # Use window_size
+                        self.deconvs.append(nn.ELU())
+                self.deconvs = nn.Sequential(*self.deconvs)
                 # init_mlp(self.deconvs, mlp_init)  # Initialize the decoder
                 ###############################
                 # prior

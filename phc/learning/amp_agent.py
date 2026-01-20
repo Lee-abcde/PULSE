@@ -347,72 +347,41 @@ class AMPAgent(common_agent.CommonAgent):
         update_list = self.update_list
         terminated_flags = torch.zeros(self.num_actors, device=self.device)
         reward_raw = torch.zeros(1, device=self.device)
-        # 初始化滑动窗口
-        W = self.window_size
-        obs_dim = self.obs['obs'].shape[-1]
-        clip_dim = self.clip_embedding.shape[-1]
-        self.gt_action_dim = 69
         if not hasattr(self, 'obs_window') or self.obs_window is None:
             self.obs, self.clip_embedding, self.kinematic_obs_window = self.env_reset(done_indices)
-            self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
-            self.obs_window[:, -1, :] = self.obs['obs']
-            self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
-            self.clip_embedding_window[:, -1, :] = self.clip_embedding
-            self.gt_action_window = torch.zeros((self.num_actors, W, self.gt_action_dim), device=self.device)
 
         for n in range(self.horizon_length):
 
             self.obs, self.clip_embedding, self.kinematic_obs_window = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
-            if len(done_indices) > 0:
-                self.obs_window[done_indices] = 0.0
-                self.obs_window[done_indices, -1, :] = self.obs['obs'][done_indices]
-                self.clip_embedding_window[done_indices] = 0.0
-                self.clip_embedding_window[done_indices, -1, :] = self.clip_embedding[done_indices]
-                # For check the correctness of "stand up" embedding
-                # print(self.clip_embedding)
-                self.gt_action_window[done_indices] = 0.0
 
             if self.use_action_masks:
                 masks = self.vec_env.get_action_masks()
                 res_dict = self.get_masked_action_values(self.obs, masks)
             else:
-                res_dict = self.get_action_values({'obs': self.obs_window, 'clip_embedding_window': self.clip_embedding_window})
-            self.experience_buffer.update_data('obs_window', n, self.obs_window)
-            self.experience_buffer.update_data('clip_embedding_window', n, self.clip_embedding_window)
+                res_dict = self.get_action_values({'obs': self.obs['obs'], 'clip_embedding': self.clip_embedding, 'kinematic_obs_window': self.kinematic_obs_window})
+            self.experience_buffer.update_data('clip_embedding', n, self.clip_embedding)
+            self.experience_buffer.update_data('kinematic_obs_window', n, self.kinematic_obs_window)
 
-            self.experience_buffer.update_data('actions', n, res_dict['actions'][:,-1,:])
-            self.experience_buffer.update_data('neglogpacs', n, res_dict['neglogpacs'][:,-1])
-            self.experience_buffer.update_data('values', n, res_dict['values'])
-            self.experience_buffer.update_data('mus', n, res_dict['mus'][:,-1,:])
-            self.experience_buffer.update_data('sigmas', n, res_dict['sigmas'][:,-1,:])
-            # for k in update_list:
-            #     self.experience_buffer.update_data(k, n, res_dict[k])
+            for k in update_list:
+                self.experience_buffer.update_data(k, n, res_dict[k])
 
             if self.has_central_value:
                 self.experience_buffer.update_data('states', n, self.obs['states'])
             
             if self.only_kin_loss and self.save_kin_info:
                 # pure behavior cloning, kinemaitc loss.
-                self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'][:,-1,:])
+                self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
                 # For check the correctness of "stand up" embedding
                 # print(self.dones, infos['kin_dict']['progress_buf'], infos['terminate'])
             else:
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
-
-            self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
-            self.obs_window[:, -1, :] = self.obs['obs']
-            self.clip_embedding_window = torch.roll( self.clip_embedding_window, shifts=-1, dims=1)
-            self.clip_embedding_window[:, -1, :] = self.clip_embedding
-            self.gt_action_window = torch.roll(self.gt_action_window, shifts=-1, dims=1)
-            self.gt_action_window[:, -1, :] = infos['kin_dict']['gt_action']
 
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
             self.experience_buffer.update_data('next_obses', n, self.obs['obs'])
             self.experience_buffer.update_data('dones', n, self.dones)
             self.experience_buffer.update_data('amp_obs', n, infos['amp_obs'])
-            self.experience_buffer.update_data('gt_action_window', n, self.gt_action_window)
             
             if self.save_kin_info:
                 self.experience_buffer.update_data('kin_dict', n, torch.cat([v.reshape(v.shape[0], -1) for k, v in infos['kin_dict'].items()], dim = -1))
@@ -484,9 +453,8 @@ class AMPAgent(common_agent.CommonAgent):
         dataset_dict['amp_obs'] = batch_dict['amp_obs']
         dataset_dict['amp_obs_demo'] = batch_dict['amp_obs_demo']
         dataset_dict['amp_obs_replay'] = batch_dict['amp_obs_replay']
-        dataset_dict['obs_window'] = batch_dict['obs_window']
-        dataset_dict['clip_embedding_window'] = batch_dict['clip_embedding_window']
-        dataset_dict['gt_action_window'] = batch_dict['gt_action_window']
+        dataset_dict['clip_embedding'] = batch_dict['clip_embedding']
+        dataset_dict['kinematic_obs_window'] = batch_dict['kinematic_obs_window']
 
         if self.save_kin_info:
             dataset_dict['kin_dict'] = batch_dict['kin_dict']
@@ -644,6 +612,34 @@ class AMPAgent(common_agent.CommonAgent):
 
         return obs_batch_out
 
+    def _preproc_kinematic_obs(self, obs_batch):
+        """
+        Manually normalize the kinematic window using the first 'self_obs_dim'
+        elements of the running mean and variance.
+        """
+        if not self.normalize_input:
+            return obs_batch
+        self_obs_dim = obs_batch.shape[-1]
+
+        mean = self.running_mean_std.running_mean[:self_obs_dim].to(
+            device=obs_batch.device,
+            dtype=obs_batch.dtype
+        )
+        var = self.running_mean_std.running_var[:self_obs_dim].to(
+            device=obs_batch.device,
+            dtype=obs_batch.dtype
+        )
+        if obs_batch.device != mean.device:
+            mean = mean.to(obs_batch.device)
+            var = var.to(obs_batch.device)
+
+        epsilon = 1e-05
+        std = torch.sqrt(var + epsilon)
+
+        normalized_obs = (obs_batch - mean) / std
+
+        normalized_obs = torch.clamp(normalized_obs, -5.0, 5.0)
+        return normalized_obs
     def calc_gradients(self, input_dict):
         
         self.set_train()
@@ -662,6 +658,7 @@ class AMPAgent(common_agent.CommonAgent):
             obs_batch = input_dict['obs']
         obs_batch_processed = self._preproc_obs(obs_batch, use_temp=self.temp_running_mean)
         input_dict['obs_processed'] = obs_batch_processed
+        input_dict['kinematic_obs_window_processed'] = self._preproc_kinematic_obs(input_dict['kinematic_obs_window'].reshape(input_dict['kinematic_obs_window'].shape[0], self.window_size, -1))
 
         amp_obs = input_dict['amp_obs'][0:self._amp_minibatch_size]
         amp_obs = self._preproc_amp_obs(amp_obs)
@@ -685,8 +682,9 @@ class AMPAgent(common_agent.CommonAgent):
             batch_dict['obs_orig'] = obs_batch
             batch_dict['obs'] = input_dict['obs_processed']
             batch_dict['kin_dict'] = input_dict['kin_dict']
-            batch_dict['clip_embedding_window'] = input_dict['clip_embedding_window'].reshape(input_dict['clip_embedding_window'].shape[0], self.window_size, -1)
-            batch_dict['gt_action_window'] = input_dict['gt_action_window'].reshape(input_dict['gt_action_window'].shape[0], self.window_size, -1)
+            batch_dict['clip_embedding'] = input_dict['clip_embedding']
+            batch_dict['kinematic_obs_window'] = input_dict['kinematic_obs_window_processed']
+
             # if humanoid_env.z_type == "vae":
             #     batch_dict['z_noise'] = input_dict['z_noise']
             
@@ -935,60 +933,19 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_action_loss"] = kin_action_loss
                 info_dict["kin_loss"] = kin_loss
             elif humanoid_env.z_type == "vq_pae":
-                with torch.no_grad():
-                    effective_mask = self.calculate_effective_mask(batch_dict['obs_orig'])
-                    B, T = effective_mask.shape
-                    gt_action_full = batch_dict['gt_action_window']
-
-                    alpha = 3.0
-                    time_steps = torch.arange(1, T + 1, device=gt_action.device)  # 1..T
-                    time_weights = torch.exp(alpha * (time_steps.float() / T)) - 1.0  # Decrease by 1 to ensure minimum weight > 0
-                    time_weights = time_weights / time_weights.max()  # Normalize to [0,1]
-                    time_weights = time_weights.unsqueeze(0).expand(B, T)  # (B, T)
-                    weighted_mask = effective_mask.detach() * time_weights
-
-
-                    valid_len = effective_mask.sum(dim=1)  # (B,)
 
                 pred_action, _, extra_dict = self.model.a2c_network.eval_actor(batch_dict, return_extra=True)
                 # ----------- Action Reconstruction Loss -----------
                 # kin_action_loss = torch.norm(pred_action[:,-1,:] - gt_action, dim=-1).mean()
-                kin_action_loss = ((pred_action - gt_action_full).norm(dim=-1) * weighted_mask.detach()).sum() / weighted_mask.sum()
+                kin_action_loss = torch.norm(pred_action - gt_action, dim=-1).mean()
 
+                # ----------- Kinematic Window Reconstruction Loss -----------
+                kin_obs_recon_loss = torch.norm(extra_dict['recon_kin_obs_window'].permute(0, 2, 1) - batch_dict['kinematic_obs_window'], dim=-1).mean()
+                info_dict["kin_obs_recon_loss"] = kin_obs_recon_loss
                 # ----------- VQ Loss -----------
                 vq_loss = extra_dict['loss']  # Include codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
-                # -----------  Prior Loss -----------
-                clip_embedding_window = batch_dict['clip_embedding_window']
-                freq_input = extra_dict['frequency'].detach()
-                target_state = extra_dict['state_after_quant'].detach()
-                target_manifold = extra_dict['full_quantized_z_out'].detach()
-                prior_mu, prior_info = self.model.a2c_network.compute_vqpae_prior(
-                    batch_dict,
-                    clip_embedding_window,  # Detached
-                    freq_input  # Detached
-                )
-                info_dict["kin_prior_vq_loss"] = prior_info['vq_loss']
-                loss_prior_state = (prior_info['state'] - target_state).pow(2).mean()
-                info_dict["kin_prior_state_loss"] = loss_prior_state
-
-                mse_per_sample = (prior_mu - target_manifold).pow(2).mean(dim=1)
-                prior_loss = (mse_per_sample * weighted_mask).sum() / (weighted_mask.sum() + 1e-8)
-                info_dict["kin_prior_loss"] = prior_loss
-                # -----------  Prior Semantic Loss -----------
-                is_valid = (batch_dict['clip_embedding_window'].abs().sum(dim=-1) > 1e-6)
-                valid_mask = is_valid.unsqueeze(-1).float()
-                sum_latent = (batch_dict['clip_embedding_window'] * valid_mask).sum(dim=1)
-                valid_counts = valid_mask.sum(dim=1)  # Shape: [B, 1]
-                # calculated valid from clip window and obs, they should be same
-                assert torch.allclose(valid_len, valid_mask.sum(dim=1).squeeze(), atol=1e-6), "Values do not match!"
-                gt_valid_avg_clip = sum_latent / valid_counts.clamp(min=1.0)
-
-                prior_state_norm = torch.nn.functional.normalize(prior_info['prior_projected_embedding'], p=2, dim=1)
-                target_clip_norm = torch.nn.functional.normalize(gt_valid_avg_clip, p=2, dim=1)
-                loss_prior_semantic = 1.0 - (prior_state_norm * target_clip_norm).sum(dim=1).mean()
-                info_dict["kin_prior_semantic_loss"] = loss_prior_semantic
 
                 # ----------- AR1 Loss-----------
                 # ar1_prior = 0
@@ -1012,15 +969,9 @@ class AMPAgent(common_agent.CommonAgent):
                 # ----------- AR1 Loss for state -----------
                 idxes = kin_dict['progress_buf'].view(self.minibatch_size // self.horizon_length,
                                                       self.horizon_length, -1)
-                time_clip_wins = clip_embedding_window.view(self.minibatch_size // self.horizon_length,
-                                                            self.horizon_length,
-                                                            clip_embedding_window.shape[1],
-                                                            clip_embedding_window.shape[2])
-                win_diff = time_clip_wins[:, 1:] - time_clip_wins[:, :-1]
-                win_diff_flat = win_diff.reshape(-1, win_diff.shape[-2] * win_diff.shape[-1])
-                is_same_semantic = torch.norm(win_diff_flat, dim=-1) < 1e-4
-                starter_mask = ((idxes <= self.window_size)[:, 1:] + (idxes <= self.window_size)[:, :-1]).view(-1)
-                ignore_smoothness = (~is_same_semantic) | starter_mask
+                not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+                starteres = ((idxes <= 2)[:, 1:] + (idxes <= 2)[:, :-1]).view(
+                    -1)  # make sure the "drop" is not affected.
 
                 pred_state = extra_dict['state_after_quant']
                 time_states = pred_state.view(self.minibatch_size // self.horizon_length,
@@ -1028,7 +979,9 @@ class AMPAgent(common_agent.CommonAgent):
                 state_diff = time_states[:, 1:] - time_states[:, :-1]
                 state_diff = state_diff.view(-1, state_diff.shape[-1])
                 smooth_diff = state_diff.clone()
-                smooth_diff[ignore_smoothness] = 0
+                smooth_diff[not_consecs] = 0
+
+                smooth_diff[starteres] = 0
                 state_smooth_loss = torch.norm(smooth_diff, dim=-1).mean()
                 info_dict["kin_state_smooth"] = state_smooth_loss
                 # handling negative case
@@ -1042,12 +995,13 @@ class AMPAgent(common_agent.CommonAgent):
                 # info_dict["kin_state_repulsion"] = state_repulsion_loss
 
                 # ----------- AR1 Loss for frequency -----------
-                not_consecs = ((idxes[:, 1:] - idxes[:, :-1]) != 1).view(-1)
+
                 time_freqs = frequency.view(self.minibatch_size // self.horizon_length,
                                             self.horizon_length, -1)
                 freq_diff = time_freqs[:, 1:] - time_freqs[:, :-1]
                 freq_diff = freq_diff.view(-1, freq_diff.shape[-1])
                 freq_diff[not_consecs] = 0
+                freq_diff[starteres] = 0
                 freq_smooth_loss = torch.norm(freq_diff, dim=-1).mean()
                 info_dict["kin_freq_smooth"] = freq_smooth_loss
                 # ----------- Regu Loss -----------
@@ -1056,27 +1010,17 @@ class AMPAgent(common_agent.CommonAgent):
                 regu_prior = ((z_q ** 2).mean() + (z_b ** 2).mean()) * 0.001
                 info_dict["kin_regu"] = regu_prior
 
-                # ----------- Semantic Alignment Loss -----------
-                projected_clip_embedding = extra_dict['projected_clip_embedding']
-                state_norm = torch.nn.functional.normalize(projected_clip_embedding, p=2, dim=1)
-                semantic_loss = 1.0 - (state_norm * target_clip_norm).sum(dim=1).mean()
-                info_dict["kin_semantic"] = semantic_loss
                 # ----------- Loss Function -----------
                 kin_loss = (
                         kin_action_loss
                         + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + kin_obs_recon_loss
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)
                         # + state_repulsion_loss * getattr(humanoid_env, "state_repulsion_coeff", 0.1)
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
                         # + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
-                        + semantic_loss * getattr(humanoid_env, "semantic_coeff", 0.1)
-                        # ---------------- Prior Loss ----------------
-                        + prior_info['vq_loss'] * getattr(humanoid_env, "prior_vq_coeff", 0.5)
-                        + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
-                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
-                        + loss_prior_semantic * getattr(humanoid_env, "prior_semantic_coeff", 0.1)
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss

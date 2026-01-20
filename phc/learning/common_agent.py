@@ -94,22 +94,17 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['next_obses'] = torch.zeros_like(self.experience_buffer.tensor_dict['obses'])
         self.experience_buffer.tensor_dict['next_values'] = torch.zeros_like(self.experience_buffer.tensor_dict['values'])
         self.window_size = self.cfg.window_size
-        obs_dim = self.obs_shape[0]
-        buffer_shape = (self.horizon_length, self.num_actors, self.window_size, obs_dim)
-        self.experience_buffer.tensor_dict['obs_window'] = torch.zeros(
-            buffer_shape, dtype=torch.float32, device=self.ppo_device
-        )
         clip_embedding_dim = 512
-        clip_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, clip_embedding_dim)
-        self.experience_buffer.tensor_dict['clip_embedding_window'] = torch.zeros(
+        clip_buffer_shape = (self.horizon_length, self.num_actors, clip_embedding_dim)
+        self.experience_buffer.tensor_dict['clip_embedding'] = torch.zeros(
             clip_buffer_shape, dtype=torch.float32, device=self.ppo_device
         )
-        action_dim = 69
-        action_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, action_dim)
-        self.experience_buffer.tensor_dict['gt_action_window'] = torch.zeros(
-            action_buffer_shape, dtype=torch.float32, device=self.ppo_device
+        self_obs_dim = 358
+        kinematic_window_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, self_obs_dim)
+        self.experience_buffer.tensor_dict['kinematic_obs_window'] = torch.zeros(
+            kinematic_window_buffer_shape, dtype=torch.float32, device=self.ppo_device
         )
-        self.tensor_list += ['next_obses', 'obs_window', 'clip_embedding_window', 'gt_action_window']
+        self.tensor_list += ['next_obses', 'clip_embedding', 'kinematic_obs_window']
         return
 
     def train(self):
@@ -277,6 +272,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
     def get_action_values(self, obs):
         obs_orig = obs['obs']
         processed_obs = self._preproc_obs(obs['obs'])
+        processed_kinematic_obs = self._preproc_kinematic_obs(obs['kinematic_obs_window'])
         self.model.eval()
         input_dict = {
             'is_train': False,
@@ -284,7 +280,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
             'obs' : processed_obs,
             "obs_orig": obs_orig,
             'rnn_states' : self.rnn_states,
-            'clip_embedding_window': obs['clip_embedding_window']
+            'clip_embedding': obs['clip_embedding'],
+            'kinematic_obs_window': processed_kinematic_obs
         }
 
         with torch.no_grad():

@@ -47,12 +47,14 @@ class IMAmpAgent(amp_agent.AMPAgent):
         if self.has_batch_dimension == False:
             obs = unsqueeze_obs(obs)
         obs = self._preproc_obs(obs)
+        kinematic_obs_window = self._preproc_kinematic_obs(obs_dict["kinematic_obs_window"])
         input_dict = {
             "is_train": False,
             "prev_actions": None,
             "obs": obs,
             "rnn_states": self.states,
-            'clip_embedding_window': obs_dict["clip_embedding_window"]
+            'clip_embedding': obs_dict["clip_embedding"],
+            "kinematic_obs_window": kinematic_obs_window
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)
@@ -213,20 +215,8 @@ class IMAmpAgent(amp_agent.AMPAgent):
             while True:
                 obs_dict, clip_embedding, kinematic_obs_window = self.env_reset(done_indices)
 
-                if (isinstance(done_indices, list) and len(done_indices) > 0) or \
-                        (not isinstance(done_indices, list) and done_indices.numel() > 0):
-                    self.obs_window[done_indices] = 0.0
-                    self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
-                    self.clip_embedding_window[done_indices] = 0.0
-                    self.clip_embedding_window[done_indices, -1, :] = self.clip_embedding[done_indices]
-
-                action = self.get_action({'obs': self.obs_window, 'clip_embedding_window': self.clip_embedding_window}, is_determenistic=True)
-                obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action[:,-1,:])
-
-                self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
-                self.obs_window[:, -1, :] = obs_dict
-                self.clip_embedding_window = torch.roll(self.clip_embedding_window, shifts=-1, dims=1)
-                self.clip_embedding_window[:, -1, :] = clip_embedding
+                action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding, 'kinematic_obs_window': kinematic_obs_window}, is_determenistic=True)
+                obs_dict, r, done, info = self.env_eval_step(self.vec_env.env, action)
                 cr += r
                 steps += 1
                 done, info = self._post_step_eval(info, done.clone())
