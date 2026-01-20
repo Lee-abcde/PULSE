@@ -216,7 +216,7 @@ class HumanoidImGetup(HumanoidIm):
         return
 
     def _compute_task_obs(self, env_ids=None, save_buffer=True):
-        obs, clip_embedding = super()._compute_task_obs(env_ids, save_buffer)
+        obs, clip_embedding, kinematic_obs_window = super()._compute_task_obs(env_ids, save_buffer)
 
         if env_ids is None:
             is_recovery = self._recovery_counter > 0
@@ -227,7 +227,7 @@ class HumanoidImGetup(HumanoidIm):
             clip_embedding[is_recovery] = self.stand_up_embedding
         # For check the correctness of "stand up" embedding
         # print("second print is_recovery: ",self._recovery_counter, clip_embedding)
-        return obs, clip_embedding
+        return obs, clip_embedding, kinematic_obs_window
 
     def _load_stand_up_embedding(self):
         script_dir = Path(__file__).parent

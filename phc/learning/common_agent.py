@@ -119,7 +119,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
         total_time = 0
         rep_count = 0
         self.frame = 0
-        self.obs, self.clip_embedding = self.env_reset()
+        self.obs, self.clip_embedding, self.kinematic_obs_window = self.env_reset()
         self.curr_frames = self.batch_size_envs
 
         model_output_file = osp.join(self.network_path, self.config['name'])
@@ -521,9 +521,9 @@ class CommonAgent(a2c_continuous.A2CAgent):
         return mb_advs
 
     def env_reset(self, env_ids=None):
-        obs, clip_embedding = self.vec_env.reset(env_ids)
+        obs, clip_embedding, kinematic_obs_window = self.vec_env.reset(env_ids)
         obs = self.obs_to_tensors(obs)
-        return obs, clip_embedding
+        return obs, clip_embedding, kinematic_obs_window
 
     def bound_loss(self, mu):
         if self.bounds_loss_coef is not None:

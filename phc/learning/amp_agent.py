@@ -353,7 +353,7 @@ class AMPAgent(common_agent.CommonAgent):
         clip_dim = self.clip_embedding.shape[-1]
         self.gt_action_dim = 69
         if not hasattr(self, 'obs_window') or self.obs_window is None:
-            self.obs, self.clip_embedding = self.env_reset(done_indices)
+            self.obs, self.clip_embedding, self.kinematic_obs_window = self.env_reset(done_indices)
             self.obs_window = torch.zeros((self.num_actors, W, obs_dim), device=self.device)
             self.obs_window[:, -1, :] = self.obs['obs']
             self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
@@ -362,7 +362,7 @@ class AMPAgent(common_agent.CommonAgent):
 
         for n in range(self.horizon_length):
 
-            self.obs, self.clip_embedding = self.env_reset(done_indices)
+            self.obs, self.clip_embedding, self.kinematic_obs_window = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
             if len(done_indices) > 0:
                 self.obs_window[done_indices] = 0.0

@@ -51,6 +51,9 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         self.device_id = cfg.get("device_id", 0)
         self.headless = cfg["headless"]
         self.start_idx = 0
+        self.kinematic_obs_window_size = cfg['learning']['params']['config']['window_size']
+        self.fps = cfg['learning']['params']['config']['fps']
+        self.window_sample_timestep = 1 / self.fps
 
         self.reward_specs = cfg["env"].get("reward_specs", {"k_pos": 100, "k_rot": 10, "k_vel": 0.1, "k_ang_vel": 0.1, "w_pos": 0.5, "w_rot": 0.3, "w_vel": 0.1, "w_ang_vel": 0.1})
 
@@ -683,7 +686,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         self.self_obs_buf[env_ids] = self_obs
 
         if (self._enable_task_obs):
-            task_obs, task_clip_embedding = self._compute_task_obs(env_ids)
+            task_obs, task_clip_embedding, kinematic_obs_window = self._compute_task_obs(env_ids)
             obs = torch.cat([self_obs, task_obs], dim=-1)
         else:
             obs = self_obs
@@ -704,7 +707,8 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         else:
             self.obs_buf[env_ids] = obs
             self.clip_embedding_buf[env_ids] = task_clip_embedding
-        return obs, task_clip_embedding
+            self.kinematic_obs_window_buf[env_ids] = kinematic_obs_window
+        return obs, task_clip_embedding, kinematic_obs_window
 
     def _compute_task_obs(self, env_ids=None, save_buffer = True):
         if (env_ids is None):
@@ -720,7 +724,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
             body_ang_vel = self._rigid_body_ang_vel[env_ids]
 
         curr_gender_betas = self.humanoid_shapes[env_ids]
-        
+        motion_window_res = None
         if self._fut_tracks:
             time_steps = self._num_traj_samples
             B = env_ids.shape[0]
@@ -730,9 +734,27 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
             motion_res = self._get_state_from_motionlib_cache(env_ids_steps, motion_times_steps, self._global_offset[env_ids].repeat_interleave(time_steps, dim=0).view(-1, 3))  # pass in the env_ids such that the motion is in synced.
 
         else:
-            motion_times = (self.progress_buf[env_ids] + 1) * self.dt + self._motion_start_times[env_ids] + self._motion_start_times_offset[env_ids]  # Next frame, so +1
+            ###### Start to read kinematic Window ###########
             time_steps = 1
-            motion_res = self._get_state_from_motionlib_cache(self._sampled_motion_ids[env_ids], motion_times, self._global_offset[env_ids])  # pass in the env_ids such that the motion is in synced.
+            time_steps_window = self.kinematic_obs_window_size
+            half_window = time_steps_window // 2  # e.g., 30
+            B = env_ids.shape[0]
+            time_internals = (torch.arange(time_steps_window).to(self.device) - half_window).repeat(B).view(-1,
+                                                                                                            time_steps_window) * self.window_sample_timestep
+            center_motion_times = (self.progress_buf[env_ids, None] + 1) * self.dt + self._motion_start_times[
+                env_ids, None] + self._motion_start_times_offset[env_ids, None]
+            motion_times_steps = (center_motion_times + time_internals).flatten()
+            env_ids_steps = self._sampled_motion_ids[env_ids].repeat_interleave(time_steps_window)
+            global_offset_steps = self._global_offset[env_ids].repeat_interleave(time_steps_window, dim=0).view(-1, 3)
+            motion_window_res = self._motion_lib.get_motion_state(env_ids_steps, motion_times_steps,
+                                                                  offset=global_offset_steps)
+            motion_res = {}
+            for key, value in motion_window_res.items():
+                if isinstance(value, torch.Tensor):
+                    # This slices out the single frame corresponding to '0' offset
+                    motion_res[key] = value[half_window::time_steps_window]
+                else:
+                    motion_res[key] = value
 
         ref_root_pos, ref_root_rot, ref_dof_pos, ref_root_vel, ref_root_ang_vel, ref_dof_vel, ref_smpl_params, ref_limb_weights, ref_pose_aa, ref_rb_pos, ref_rb_rot, ref_body_vel, ref_body_ang_vel = \
                 motion_res["root_pos"], motion_res["root_rot"], motion_res["dof_pos"], motion_res["root_vel"], motion_res["root_ang_vel"], motion_res["dof_vel"], \
@@ -850,7 +872,32 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
                 self.ref_body_pos_subset[env_ids] = ref_rb_pos_subset
                 self.ref_dof_pos[env_ids] = ref_dof_pos
 
-        return obs, ref_clip_embedding
+        if self.humanoid_type in ["smpl", "smplh", "smplx"] and motion_window_res is not None:
+            window_rb_pos = motion_window_res["rg_pos"]  # Shape: (B * Window, num_bodies, 3)
+            window_rb_rot = motion_window_res["rb_rot"]  # Shape: (B * Window, num_bodies, 4)
+            window_body_vel = motion_window_res["body_vel"]  # Shape: (B * Window, num_bodies, 3)
+            window_body_ang_vel = motion_window_res["body_ang_vel"]  # Shape: (B * Window, num_bodies, 3)
+            window_smpl_params = motion_window_res["motion_bodies"]  # Shape: (B * Window, smpl_param_dim)
+            window_limb_weights = motion_window_res["motion_limb_weights"]
+
+            flat_window_obs = compute_humanoid_observations_smpl_max(
+                window_rb_pos,
+                window_rb_rot,
+                window_body_vel,
+                window_body_ang_vel,
+                window_smpl_params,
+                window_limb_weights,
+                self._local_root_obs,
+                self._root_height_obs,
+                self._has_upright_start,
+                self._has_shape_obs,
+                self._has_limb_weight_obs
+            )
+            batch_size = env_ids.shape[0]
+            kinematic_obs_window = flat_window_obs.view(batch_size, time_steps_window, -1)
+        else:
+            import ipdb; ipdb.set_trace()
+        return obs, ref_clip_embedding, kinematic_obs_window
 
     def _compute_reward(self, actions):
         body_pos = self._rigid_body_pos
@@ -1704,3 +1751,70 @@ def compute_humanoid_traj_reset(reset_buf, progress_buf, contact_buf, contact_bo
     reset = torch.where(pass_time, torch.ones_like(reset_buf), terminated)
 
     return reset, terminated
+
+
+@torch.jit.script
+def compute_humanoid_observations_smpl_max(body_pos, body_rot, body_vel, body_ang_vel, smpl_params, limb_weight_params,
+                                           local_root_obs, root_height_obs, upright, has_smpl_params,
+                                           has_limb_weight_params):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, bool, bool, bool, bool, bool) -> Tensor
+    root_pos = body_pos[:, 0, :]
+    root_rot = body_rot[:, 0, :]
+
+    root_h = root_pos[:, 2:3]
+    if not upright:
+        root_rot = remove_base_rot(root_rot)
+    heading_rot_inv = torch_utils.calc_heading_quat_inv(root_rot)
+
+    if (not root_height_obs):
+        root_h_obs = torch.zeros_like(root_h)
+    else:
+        root_h_obs = root_h
+
+    heading_rot_inv_expand = heading_rot_inv.unsqueeze(-2)
+    heading_rot_inv_expand = heading_rot_inv_expand.repeat((1, body_pos.shape[1], 1))
+    flat_heading_rot_inv = heading_rot_inv_expand.reshape(
+        heading_rot_inv_expand.shape[0] * heading_rot_inv_expand.shape[1], heading_rot_inv_expand.shape[2])
+
+    root_pos_expand = root_pos.unsqueeze(-2)
+    local_body_pos = body_pos - root_pos_expand
+    flat_local_body_pos = local_body_pos.reshape(local_body_pos.shape[0] * local_body_pos.shape[1],
+                                                 local_body_pos.shape[2])
+    flat_local_body_pos = torch_utils.my_quat_rotate(flat_heading_rot_inv, flat_local_body_pos)
+    local_body_pos = flat_local_body_pos.reshape(local_body_pos.shape[0],
+                                                 local_body_pos.shape[1] * local_body_pos.shape[2])
+    local_body_pos = local_body_pos[..., 3:]  # remove root pos
+
+    flat_body_rot = body_rot.reshape(body_rot.shape[0] * body_rot.shape[1],
+                                     body_rot.shape[2])  # This is global rotation of the body
+    flat_local_body_rot = quat_mul(flat_heading_rot_inv, flat_body_rot)
+    flat_local_body_rot_obs = torch_utils.quat_to_tan_norm(flat_local_body_rot)
+    local_body_rot_obs = flat_local_body_rot_obs.reshape(body_rot.shape[0],
+                                                         body_rot.shape[1] * flat_local_body_rot_obs.shape[1])
+
+    if not (local_root_obs):
+        root_rot_obs = torch_utils.quat_to_tan_norm(root_rot)  # If not local root obs, you override it.
+        local_body_rot_obs[..., 0:6] = root_rot_obs
+
+    flat_body_vel = body_vel.reshape(body_vel.shape[0] * body_vel.shape[1], body_vel.shape[2])
+    flat_local_body_vel = torch_utils.my_quat_rotate(flat_heading_rot_inv, flat_body_vel)
+    local_body_vel = flat_local_body_vel.reshape(body_vel.shape[0], body_vel.shape[1] * body_vel.shape[2])
+
+    flat_body_ang_vel = body_ang_vel.reshape(body_ang_vel.shape[0] * body_ang_vel.shape[1], body_ang_vel.shape[2])
+    flat_local_body_ang_vel = torch_utils.my_quat_rotate(flat_heading_rot_inv, flat_body_ang_vel)
+    local_body_ang_vel = flat_local_body_ang_vel.reshape(body_ang_vel.shape[0],
+                                                         body_ang_vel.shape[1] * body_ang_vel.shape[2])
+
+    obs_list = []
+    if root_height_obs:
+        obs_list.append(root_h_obs)
+    obs_list += [local_body_pos, local_body_rot_obs, local_body_vel, local_body_ang_vel]
+
+    if has_smpl_params:
+        obs_list.append(smpl_params)
+
+    if has_limb_weight_params:
+        obs_list.append(limb_weight_params)
+
+    obs = torch.cat(obs_list, dim=-1)
+    return obs
