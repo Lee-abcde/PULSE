@@ -157,12 +157,14 @@ class CommonPlayer(players.PpoPlayerContinuous):
         if self.has_batch_dimension == False:
             obs = unsqueeze_obs(obs)
         obs = self._preproc_obs(obs)
+        kinematic_obs_window_preocessed = self._preproc_kinematic_obs(obs_dict['kinematic_obs_window'])
         input_dict = {
             'is_train': False,
             'prev_actions': None,
             'obs' : obs,
             'rnn_states' : self.states,
-            'clip_embedding_window': obs_dict['clip_embedding_window']
+            'clip_embedding': obs_dict['clip_embedding'],
+            'kinematic_obs_window': kinematic_obs_window_preocessed,
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)
@@ -216,8 +218,8 @@ class CommonPlayer(players.PpoPlayerContinuous):
         return
 
     def env_reset(self, env_ids=None):
-        obs, clip_embedding = self.env.reset(env_ids)
-        return self.obs_to_torch(obs), clip_embedding
+        obs, clip_embedding, kinematic_obs_window = self.env.reset(env_ids)
+        return self.obs_to_torch(obs), clip_embedding, kinematic_obs_window
 
     def _post_step(self, info):
         return

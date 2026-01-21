@@ -229,7 +229,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
         for t in range(n_games):
             if games_played >= n_games:
                 break
-            obs_dict, clip_embedding = self.env_reset()
+            obs_dict, clip_embedding, kinematic_obs_window = self.env_reset()
 
             batch_size = 1
             batch_size = self.get_batch_size(obs_dict["obs"], batch_size)
@@ -245,25 +245,10 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
 
             done_indices = []
 
-            W = self.window_size
-            obs_dim = obs_dict['obs'].shape[-1]
-            clip_dim = clip_embedding.shape[-1]
-            if not hasattr(self, 'obs_window') or self.obs_window is None:
-                obs_dict, clip_embedding = self.env_reset(done_indices)
-                self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
-                self.obs_window[:, -1, :] = obs_dict['obs']
-                self.clip_embedding_window = torch.zeros((batch_size, W, clip_dim), device=self.device)
-                self.clip_embedding_window[:, -1, :] = clip_embedding
             with torch.no_grad():
                 for n in range(self.max_steps):
-                    obs_dict, clip_embedding = self.env_reset(done_indices)
+                    obs_dict, clip_embedding, kinematic_obs_window = self.env_reset(done_indices)
 
-                    if (isinstance(done_indices, list) and len(done_indices) > 0) or \
-                            (not isinstance(done_indices, list) and done_indices.numel() > 0):
-                        self.obs_window[done_indices] = 0.0
-                        self.obs_window[done_indices, -1, :] = obs_dict['obs'][done_indices]
-                        self.clip_embedding_window[done_indices] = 0.0
-                        self.clip_embedding_window[done_indices, -1, :] = clip_embedding[done_indices]
                     if COLLECT_Z: z = self.get_z(obs_dict)
                         
 
@@ -271,14 +256,9 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         masks = self.env.get_action_mask()
                         action = self.get_masked_action(obs_dict, masks, is_determenistic)
                     else:
-                        action = self.get_action({'obs': self.obs_window, 'clip_embedding_window': self.clip_embedding_window}, is_determenistic)
+                        action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding, 'kinematic_obs_window': kinematic_obs_window}, is_determenistic)
 
-                    obs_dict, r, done, info = self.env_step(self.env, action[:,-1,:])
-
-                    self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
-                    self.obs_window[:, -1, :] = obs_dict
-                    self.clip_embedding_window = torch.roll(self.clip_embedding_window, shifts=-1, dims=1)
-                    self.clip_embedding_window[:, -1, :] = clip_embedding
+                    obs_dict, r, done, info = self.env_step(self.env, action)
 
                     cr += r
                     steps += 1
@@ -357,3 +337,31 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             )
 
         return
+    def _preproc_kinematic_obs(self, obs_batch):
+        """
+        Manually normalize the kinematic window using the first 'self_obs_dim'
+        elements of the running mean and variance.
+        """
+        if not self.normalize_input:
+            return obs_batch
+        self_obs_dim = obs_batch.shape[-1]
+
+        mean = self.running_mean_std.running_mean[:self_obs_dim].to(
+            device=obs_batch.device,
+            dtype=obs_batch.dtype
+        )
+        var = self.running_mean_std.running_var[:self_obs_dim].to(
+            device=obs_batch.device,
+            dtype=obs_batch.dtype
+        )
+        if obs_batch.device != mean.device:
+            mean = mean.to(obs_batch.device)
+            var = var.to(obs_batch.device)
+
+        epsilon = 1e-05
+        std = torch.sqrt(var + epsilon)
+
+        normalized_obs = (obs_batch - mean) / std
+
+        normalized_obs = torch.clamp(normalized_obs, -5.0, 5.0)
+        return normalized_obs
