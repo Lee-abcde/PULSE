@@ -746,7 +746,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
             motion_times_steps = (center_motion_times + time_internals).flatten()
             env_ids_steps = self._sampled_motion_ids[env_ids].repeat_interleave(time_steps_window)
             global_offset_steps = self._global_offset[env_ids].repeat_interleave(time_steps_window, dim=0).view(-1, 3)
-            motion_window_res = self._motion_lib.get_motion_state(env_ids_steps, motion_times_steps,
+            motion_window_res = self._get_state_from_motionlib_cache(env_ids_steps, motion_times_steps,
                                                                   offset=global_offset_steps)
             motion_res = {}
             for key, value in motion_window_res.items():
