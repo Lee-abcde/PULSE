@@ -191,17 +191,6 @@ class IMAmpAgent(amp_agent.AMPAgent):
         obs_dict, clip_embedding, kinematic_obs_window = self.env_reset()
         batch_size = humanoid_env.num_envs
 
-        W = self.window_size
-        obs_dim = obs_dict['obs'].shape[-1]
-        clip_dim = clip_embedding.shape[-1]
-        done_indices = []
-        if not hasattr(self, 'obs_window') or self.obs_window is None:
-            obs_dict, clip_embedding, kinematic_obs_window = self.env_reset(done_indices)
-            self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
-            self.obs_window[:, -1, :] = obs_dict['obs']
-            self.clip_embedding_window = torch.zeros((self.num_actors, W, clip_dim), device=self.device)
-            self.clip_embedding_window[:, -1, :] = self.clip_embedding
-
 
         if need_init_rnn:
             self.init_rnn()
