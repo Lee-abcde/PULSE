@@ -191,7 +191,6 @@ class IMAmpAgent(amp_agent.AMPAgent):
         obs_dict, clip_embedding, kinematic_obs_window = self.env_reset()
         batch_size = humanoid_env.num_envs
 
-
         if need_init_rnn:
             self.init_rnn()
             need_init_rnn = False
@@ -199,6 +198,7 @@ class IMAmpAgent(amp_agent.AMPAgent):
         cr = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
         steps = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
 
+        done_indices = []
 
         with torch.no_grad():
             while True:
