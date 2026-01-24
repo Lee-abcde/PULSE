@@ -188,7 +188,6 @@ class IMAmpAgent(amp_agent.AMPAgent):
         self.has_batch_dimension = True
 
         need_init_rnn = self.is_rnn
-        obs_dict, clip_embedding, kinematic_obs_window = self.env_reset()
         batch_size = humanoid_env.num_envs
 
         if need_init_rnn:
@@ -238,6 +237,20 @@ class IMAmpAgent(amp_agent.AMPAgent):
 
         ################## Save results first; ZL: Ugllllllllly code, refractor asap ##################
         torch.cuda.empty_cache()
+        ############################################
+        # Possible Optimize of out of CUDA Memory
+        ############################################
+        # if hasattr(humanoid_env, '_motion_eval_lib'):
+        #     eval_lib = humanoid_env._motion_eval_lib
+        #     attrs = ['gts', 'grs', 'lrs', 'grvs', 'gravs', 'gavs', 'gvs', 'dvs',
+        #              'q_gts', 'q_grs', 'q_gavs', 'q_gvs',
+        #              'clip_embeddings', '_motion_clip_embeddings',
+        #              '_motion_aa', '_motion_bodies', '_motion_limb_weights']
+        #     for attr in attrs:
+        #         if hasattr(eval_lib, attr):
+        #             delattr(eval_lib, attr)
+        #             print("delete", attr)
+        #             print_mem("After Global")
         gc.collect()
         
         self.update_training_data(info['failed_keys'])

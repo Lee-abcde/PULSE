@@ -873,28 +873,29 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
                 self.ref_dof_pos[env_ids] = ref_dof_pos
 
         if self.humanoid_type in ["smpl", "smplh", "smplx"] and motion_window_res is not None:
-            window_rb_pos = motion_window_res["rg_pos"]  # Shape: (B * Window, num_bodies, 3)
-            window_rb_rot = motion_window_res["rb_rot"]  # Shape: (B * Window, num_bodies, 4)
-            window_body_vel = motion_window_res["body_vel"]  # Shape: (B * Window, num_bodies, 3)
-            window_body_ang_vel = motion_window_res["body_ang_vel"]  # Shape: (B * Window, num_bodies, 3)
-            window_smpl_params = motion_window_res["motion_bodies"]  # Shape: (B * Window, smpl_param_dim)
-            window_limb_weights = motion_window_res["motion_limb_weights"]
+            with torch.no_grad():
+                window_rb_pos = motion_window_res["rg_pos"]  # Shape: (B * Window, num_bodies, 3)
+                window_rb_rot = motion_window_res["rb_rot"]  # Shape: (B * Window, num_bodies, 4)
+                window_body_vel = motion_window_res["body_vel"]  # Shape: (B * Window, num_bodies, 3)
+                window_body_ang_vel = motion_window_res["body_ang_vel"]  # Shape: (B * Window, num_bodies, 3)
+                window_smpl_params = motion_window_res["motion_bodies"]  # Shape: (B * Window, smpl_param_dim)
+                window_limb_weights = motion_window_res["motion_limb_weights"]
 
-            flat_window_obs = compute_humanoid_observations_smpl_max(
-                window_rb_pos,
-                window_rb_rot,
-                window_body_vel,
-                window_body_ang_vel,
-                window_smpl_params,
-                window_limb_weights,
-                self._local_root_obs,
-                self._root_height_obs,
-                self._has_upright_start,
-                self._has_shape_obs,
-                self._has_limb_weight_obs
-            )
-            batch_size = env_ids.shape[0]
-            kinematic_obs_window = flat_window_obs.view(batch_size, time_steps_window, -1)
+                flat_window_obs = compute_humanoid_observations_smpl_max(
+                    window_rb_pos,
+                    window_rb_rot,
+                    window_body_vel,
+                    window_body_ang_vel,
+                    window_smpl_params,
+                    window_limb_weights,
+                    self._local_root_obs,
+                    self._root_height_obs,
+                    self._has_upright_start,
+                    self._has_shape_obs,
+                    self._has_limb_weight_obs
+                )
+                batch_size = env_ids.shape[0]
+                kinematic_obs_window = flat_window_obs.view(batch_size, time_steps_window, -1)
         else:
             import ipdb; ipdb.set_trace()
         return obs, ref_clip_embedding, kinematic_obs_window
