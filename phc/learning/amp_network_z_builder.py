@@ -713,7 +713,7 @@ class AMPZBuilder(AMPBuilder):
             a_out = a_out.contiguous().view(a_out.size(0), -1)
 
             self_obs = obs[:, ..., :self.self_obs_size]
-            # task_obs = obs[:, self.self_obs_size:]
+            task_root_obs = self.extract_root_task_condition(obs[:, self.self_obs_size:])
             assert (obs.shape[-1] == self.self_obs_size + self.task_obs_size)
             
             if self.has_rnn:
@@ -812,7 +812,7 @@ class AMPZBuilder(AMPBuilder):
                     actor_input = z_out
                 else:
                     central_frame = z_out.shape[-1] // 2   # 61 // 2 = 30
-                    actor_input = torch.cat([self_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
+                    actor_input = torch.cat([self_obs, task_root_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
                 
@@ -839,6 +839,56 @@ class AMPZBuilder(AMPBuilder):
                         return mu, sigma, extra_dict
                     else:
                         return mu, sigma
+
+        def extract_root_task_condition(self, task_obs, num_joints=24, time_steps=1):
+            """
+            Extracts the specific Root (Joint 0) information from the concatenated task_obs.
+
+            Args:
+                task_obs: The concatenated observation tensor.
+                          Shape: (B, time_steps * total_features) or (B, total_features) if flattened.
+                num_joints: Number of joints (default 24 based on your code).
+                time_steps: The length of the window (T).
+
+            Returns:
+                root_condition: A tensor containing only the root's target info and velocity differences.
+                                Shape: (B, -1) which flattens (B, time_steps, 15)
+            """
+            B = task_obs.shape[0]
+            obs_reshaped = task_obs.view(B, time_steps, -1)
+
+            dim_pos = 3  # diff_local_body_pos (x,y,z)
+            dim_rot = 6  # diff_local_body_rot (6d rotation)
+            dim_vel = 3  # diff_local_vel
+            dim_ang = 3  # diff_local_ang_vel
+            dim_ref_pos = 3  # local_ref_body_pos
+            dim_ref_rot = 6  # local_ref_body_rot
+
+            idx_diff_pos = 0
+
+            idx_diff_rot = idx_diff_pos + (num_joints * dim_pos)
+            idx_diff_vel = idx_diff_rot + (num_joints * dim_rot)
+            idx_diff_ang = idx_diff_vel + (num_joints * dim_vel)
+            idx_ref_pos = idx_diff_ang + (num_joints * dim_ang)
+            idx_ref_rot = idx_ref_pos + (num_joints * dim_ref_pos)
+
+            root_diff_pos = obs_reshaped[:, :, 0: 3]
+            root_diff_rot = obs_reshaped[:, :, idx_diff_rot: idx_diff_rot + 6]
+            root_diff_vel = obs_reshaped[:, :, idx_diff_vel: idx_diff_vel + 3]
+            root_diff_ang = obs_reshaped[:, :, idx_diff_ang: idx_diff_ang + 3]
+            root_ref_pos = obs_reshaped[:, :, idx_ref_pos: idx_ref_pos + 3]
+            root_ref_rot = obs_reshaped[:, :, idx_ref_rot: idx_ref_rot + 6]
+
+            root_task_condition = torch.cat([
+                root_diff_pos,
+                root_diff_rot,
+                root_diff_vel,  # Velocity Correction
+                root_diff_ang,  # Turning Correction
+                root_ref_pos,  # Target Displacement (Most Important)
+                root_ref_rot,  # Target Orientation
+            ], dim=-1)
+
+            return root_task_condition.view(B, -1)
 
         def _visualize_mu(self, mu):
             """
