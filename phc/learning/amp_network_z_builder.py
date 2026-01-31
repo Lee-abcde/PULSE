@@ -880,10 +880,10 @@ class AMPZBuilder(AMPBuilder):
             root_ref_rot = obs_reshaped[:, :, idx_ref_rot: idx_ref_rot + 6]
 
             root_task_condition = torch.cat([
-                root_diff_pos,
-                root_diff_rot,
-                root_diff_vel,  # Velocity Correction
-                root_diff_ang,  # Turning Correction
+                # root_diff_pos,
+                # root_diff_rot,
+                # root_diff_vel,  # Velocity Correction
+                # root_diff_ang,  # Turning Correction
                 root_ref_pos,  # Target Displacement (Most Important)
                 root_ref_rot,  # Target Orientation
             ], dim=-1)
