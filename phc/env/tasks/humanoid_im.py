@@ -894,6 +894,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
                     self._has_shape_obs,
                     self._has_limb_weight_obs
                 )
+                flat_window_obs = flat_window_obs[..., :214]
                 batch_size = env_ids.shape[0]
                 kinematic_obs_window = flat_window_obs.view(batch_size, time_steps_window, -1)
         else:

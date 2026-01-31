@@ -1021,7 +1021,8 @@ class AMPZBuilder(AMPBuilder):
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
                 self.clip_dim = getattr(self, 'clip_dim', 512)
-                self.n_input_channels = self_obs_size
+                self.kinematic_obs_size = 214
+                self.n_input_channels = self.kinematic_obs_size
                 self.n_latent_channels = self.embedding_size
                 self.fps = 30.
                 self.window = getattr(self, 'window', (self.window_size - 1) / self.fps) # window=1.0, 2.0

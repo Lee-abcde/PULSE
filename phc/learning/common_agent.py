@@ -99,7 +99,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['clip_embedding'] = torch.zeros(
             clip_buffer_shape, dtype=torch.float32, device=self.ppo_device
         )
-        self_obs_dim = 358
+        self_obs_dim = 214
         kinematic_window_buffer_shape = (self.horizon_length, self.num_actors, self.window_size, self_obs_dim)
         self.experience_buffer.tensor_dict['kinematic_obs_window'] = torch.zeros(
             kinematic_window_buffer_shape, dtype=torch.float32, device=self.ppo_device
