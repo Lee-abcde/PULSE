@@ -1428,6 +1428,18 @@ def compute_imitation_observations_v6(root_pos, root_rot, body_pos, body_rot, bo
     local_ref_body_rot = torch_utils.quat_mul(heading_inv_rot_expand.view(-1, 4), ref_body_rot.view(-1, 4))
     local_ref_body_rot = torch_utils.quat_to_tan_norm(local_ref_body_rot)
 
+    #######################################
+    # Debug: Trying to calculate the heading rotation difference
+    #######################################
+    # ref_root_rot = ref_body_rot.view(B, J, 4)[:, 0, :]
+    # ref_heading_rot = torch_utils.calc_heading_quat(ref_root_rot)
+    # rel_heading_rot = torch_utils.quat_mul(heading_inv_rot, ref_heading_rot)
+    # rel_heading_obs = torch_utils.quat_to_tan_norm(rel_heading_rot)
+    #
+    # ref_tan_in_local = local_ref_body_rot.view(B, J, 6)[:, 0, :3]
+    # ref_heading_2d = ref_tan_in_local[..., :2]
+    # ref_heading_2d = torch.nn.functional.normalize(ref_heading_2d, dim=-1)
+
     # make some changes to how futures are appended.
     obs.append(diff_local_body_pos_flat.view(B, time_steps, -1))  # 1 * timestep * 24 * 3
     obs.append(torch_utils.quat_to_tan_norm(diff_local_body_rot_flat).view(B, time_steps, -1))  #  1 * timestep * 24 * 6

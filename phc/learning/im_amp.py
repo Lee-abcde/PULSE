@@ -54,7 +54,8 @@ class IMAmpAgent(amp_agent.AMPAgent):
             "obs": obs,
             "rnn_states": self.states,
             'clip_embedding': obs_dict["clip_embedding"],
-            "kinematic_obs_window": kinematic_obs_window
+            "kinematic_obs_window": kinematic_obs_window,
+            "obs_orig": obs_dict["obs"]
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)

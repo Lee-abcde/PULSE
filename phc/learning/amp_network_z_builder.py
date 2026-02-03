@@ -713,7 +713,7 @@ class AMPZBuilder(AMPBuilder):
             a_out = a_out.contiguous().view(a_out.size(0), -1)
 
             self_obs = obs[:, ..., :self.self_obs_size]
-            task_root_obs = self.extract_root_task_condition(obs[:, self.self_obs_size:])
+            task_root_obs = self.extract_root_task_condition(obs_dict['obs_orig'][:, self.self_obs_size:])
             assert (obs.shape[-1] == self.self_obs_size + self.task_obs_size)
             
             if self.has_rnn:
@@ -876,16 +876,20 @@ class AMPZBuilder(AMPBuilder):
             root_diff_rot = obs_reshaped[:, :, idx_diff_rot: idx_diff_rot + 6]
             root_diff_vel = obs_reshaped[:, :, idx_diff_vel: idx_diff_vel + 3]
             root_diff_ang = obs_reshaped[:, :, idx_diff_ang: idx_diff_ang + 3]
-            root_ref_pos = obs_reshaped[:, :, idx_ref_pos: idx_ref_pos + 3]
+            root_ref_pos = obs_reshaped[:, :, idx_ref_pos: idx_ref_pos + 2]
             root_ref_rot = obs_reshaped[:, :, idx_ref_rot: idx_ref_rot + 6]
 
+            ref_tan_in_local = root_ref_rot[:, 0, :3]
+            ref_heading_2d = ref_tan_in_local[..., :2]
+            ref_heading_2d_rot = torch.nn.functional.normalize(ref_heading_2d, dim=-1).view(B, time_steps, -1)
             root_task_condition = torch.cat([
                 # root_diff_pos,
                 # root_diff_rot,
                 # root_diff_vel,  # Velocity Correction
                 # root_diff_ang,  # Turning Correction
                 root_ref_pos,  # Target Displacement (Most Important)
-                root_ref_rot,  # Target Orientation
+                # root_ref_rot,  # Target Orientation
+                ref_heading_2d_rot
             ], dim=-1)
 
             return root_task_condition.view(B, -1)

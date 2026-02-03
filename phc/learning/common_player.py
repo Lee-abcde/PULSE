@@ -165,6 +165,7 @@ class CommonPlayer(players.PpoPlayerContinuous):
             'rnn_states' : self.states,
             'clip_embedding': obs_dict['clip_embedding'],
             'kinematic_obs_window': kinematic_obs_window_preocessed,
+            'obs_orig': obs_dict['obs']
         }
         with torch.no_grad():
             res_dict = self.model(input_dict)
