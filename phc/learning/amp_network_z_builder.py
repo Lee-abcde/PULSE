@@ -202,15 +202,17 @@ class AMPZBuilder(AMPBuilder):
 
             return freq, amp, offset
 
-        def analytical_phase(self, latent, f, b):
+        def analytical_phase(self, latent, f, b, prior_mode=False):
             b = b.unsqueeze(-1)
             f = f.unsqueeze(-1)
+            args = self.prior_args[1:-1] if prior_mode else self.args
 
             y = latent - b
-            sx = torch.sum(y * torch.cos(self.tpi * f * self.args), dim=2)
-            sy = torch.sum(y * torch.sin(self.tpi * f * self.args), dim=2)
+            phase_term = self.tpi * f * args
+            sx = torch.sum(y * torch.cos(phase_term), dim=2)
+            sy = torch.sum(y * torch.sin(phase_term), dim=2)
             if torch.any((f.squeeze(-1) == 0) & (sx == 0)):
-                print("!!! analytical_phase: 发现 f == 0 且 sx == 0. 这会导致 atan2(0, 0) -> nan 梯度 !!!")
+                print("Warning: f == 0 and sx == 0 detected. This may cause atan2(0, 0) and produce NaN gradients.")
             p = -torch.atan2(sy, sx + 1e-8) / self.tpi
             return p
 
@@ -564,46 +566,31 @@ class AMPZBuilder(AMPBuilder):
             prior_mu = self.z_prior_mu(prior_latent)
             return prior_mu
 
-        def compute_vqpae_prior(self, obs_dict, clip_embedding_window, frequency):
-            is_valid = (clip_embedding_window.abs().sum(dim=-1) > 1e-6)
-            valid_mask = is_valid.unsqueeze(1).float()
+        def compute_vqpae_prior(self, obs_dict, frequency):
 
-            self_obs = obs_dict['obs'][:, :, :self.self_obs_size]
-            if self.training:
-                drop_prob = 0.4
-                mask = (torch.rand(self_obs.shape[0], 1, 1, device=self_obs.device) > drop_prob).float()
-                self_obs = self_obs * mask
-            text_feat = self.text_adapter(clip_embedding_window).permute(0, 2, 1)
-            self_obs = torch.cat([self_obs.permute(0, 2, 1), text_feat], dim=1)
+            # self_obs = obs_dict['obs'][:, :self.kinematic_obs_size ]
+            past_len = obs_dict['kinematic_obs_window'].shape[1] // 2
+            self_kinematic_obs_window = obs_dict['kinematic_obs_window'][:, 1:past_len].clone()
+            # use current obs to replace the kinematic obs
+            # self_kinematic_obs_window[:,-1] = self_obs
+            self_kinematic_obs_window = self_kinematic_obs_window.permute(0, 2, 1)
 
-            prior_latent = self.prior_z_encoder(self_obs)
-            sum_latent = (prior_latent * valid_mask).sum(dim=-1)
-            valid_counts = valid_mask.sum(dim=-1)  # Shape: [B, 1]
-            state_input = sum_latent / valid_counts.clamp(min=1.0)
+            prior_latent = self.prior_z_encoder(self_kinematic_obs_window)
+            state_input = prior_latent.mean(axis=-1)
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
             loss, state, _, _ = self.quantizer(state, freeze_codebook=True)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
             offset = torch.mean(prior_latent1d, dim=2)
-            p = self.analytical_phase(prior_latent1d, frequency, offset)
-            angles = self.tpi * (frequency.unsqueeze(-1) * self.args + p.unsqueeze(-1))
+            p = self.analytical_phase(prior_latent1d, frequency, offset, prior_mode=True)
+
+            angles = self.tpi * (frequency.unsqueeze(-1) * self.prior_args + p.unsqueeze(-1))
 
             prior_manifold, _ = self.get_phase_manifold(state, angles)
-            prior_projected_embedding = self.state_proj_head(state)
-
-            # encode text using phase
-            phase_exp = torch.stack([torch.sin(angles), torch.cos(angles)], dim=1)
-            text_exp = text_feat.unsqueeze(1)
-            text_phase_feat = (phase_exp * text_exp).reshape(
-                text_feat.size(0), -1, text_feat.size(2)
-            )
             return prior_manifold, {
                 "state": state,
-                "prior_projected_embedding": prior_projected_embedding,
                 "vq_loss": loss,
-                "prior_adapted_text_feat": text_feat,
-                'phase_text_feat': text_phase_feat
             }
 
         def reparameterize(self, mu, logvar):
@@ -1048,6 +1035,9 @@ class AMPZBuilder(AMPBuilder):
                 self.args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
                                                  dtype=np.float32)), requires_grad=False)
+                self.prior_args = nn.Parameter(
+                    torch.from_numpy(np.linspace(-self.window / 4, self.window / 4, self.time_range // 2 + 1,
+                                                 dtype=np.float32)), requires_grad=False)
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
                 normalizer = partial(LN_v3, keep_std=True)
@@ -1093,8 +1083,8 @@ class AMPZBuilder(AMPBuilder):
                 ###############################
                 # prior
                 ###############################
-                self.prior_input_channels = self_obs_size
-                prior_encoder_channels = [self.prior_input_channels + self.clip_dim] + [self.intermediate_channels] * (
+                self.prior_input_channels = self.kinematic_obs_size
+                prior_encoder_channels = [self.prior_input_channels] + [self.intermediate_channels] * (
                             self.pae_n_layers - 1) + [self.n_latent_channels]
                 self.prior_z_encoder = []
                 for i in range(self.pae_n_layers):

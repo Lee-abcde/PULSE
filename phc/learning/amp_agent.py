@@ -947,6 +947,22 @@ class AMPAgent(common_agent.CommonAgent):
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
 
+                # -----------  Prior Loss -----------
+                freq_input = extra_dict['frequency'].detach()
+                target_state = extra_dict['state_after_quant'].detach()
+                target_manifold = extra_dict['full_quantized_z_out'].detach()
+                prior_mu, prior_info = self.model.a2c_network.compute_vqpae_prior(
+                    batch_dict,
+                    freq_input  # Detached
+                )
+                info_dict["kin_prior_vq_loss"] = prior_info['vq_loss']
+
+                loss_prior_state = (prior_info['state'] - target_state).pow(2).mean()
+                info_dict["kin_prior_state_loss"] = loss_prior_state
+
+                center_frame_idx = target_manifold.shape[2] // 2
+                prior_loss = (prior_mu[:,:,-1] - target_manifold[..., center_frame_idx]).pow(2).mean()
+                info_dict["kin_prior_loss"] = prior_loss
                 # ----------- AR1 Loss-----------
                 # ar1_prior = 0
                 # if humanoid_env.use_ar1_prior:
@@ -1021,6 +1037,10 @@ class AMPAgent(common_agent.CommonAgent):
                         + freq_smooth_loss * getattr(humanoid_env, "frequency_smooth_coeff", 0.005)
                         # + freq_lower_bound_loss * getattr(humanoid_env, "frequency_lower_bound_coeff", 0.01)
                         + regu_prior * 0.005
+                        # ---------------- Prior Loss ----------------
+                        + prior_info['vq_loss'] * getattr(humanoid_env, "prior_vq_coeff", 0.5)
+                        + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
+                        + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss
