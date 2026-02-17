@@ -499,9 +499,10 @@ class AMPZBuilder(AMPBuilder):
                         import ipdb;
                         ipdb.set_trace()
                         flags.text_change = False
-                    clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).repeat(self.window_size, 1).unsqueeze(0).cuda()
-                    prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, clip_embedding, f)
-                    extra_dict = {'adapted_clip_embedding': prior_info['prior_adapted_text_feat'], 'phase_text_feat': prior_info['phase_text_feat']}
+                    clip_embedding = self.get_clip_embedding(self.input_text, self.clip_embedding_dict).unsqueeze(0).cuda()
+                    text_feat_debug = self.text_adapter(clip_embedding)
+                    prior_mu, prior_info = self.compute_vqpae_prior(obs_dict, f)
+                    extra_dict = {'adapted_clip_embedding': text_feat_debug}
                     return prior_mu, extra_dict
 
                     self.debug_phase_p += f * 0.033  # increment per step (adjust step size)
@@ -570,7 +571,7 @@ class AMPZBuilder(AMPBuilder):
 
             # self_obs = obs_dict['obs'][:, :self.kinematic_obs_size ]
             past_len = obs_dict['kinematic_obs_window'].shape[1] // 2
-            self_kinematic_obs_window = obs_dict['kinematic_obs_window'][:, 1:past_len].clone()
+            self_kinematic_obs_window = obs_dict['kinematic_obs_window'][:, past_len-self.prior_time_range+2:past_len].clone()
             # use current obs to replace the kinematic obs
             # self_kinematic_obs_window[:,-1] = self_obs
             self_kinematic_obs_window = self_kinematic_obs_window.permute(0, 2, 1)
@@ -1035,8 +1036,10 @@ class AMPZBuilder(AMPBuilder):
                 self.args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
                                                  dtype=np.float32)), requires_grad=False)
+                self.prior_time_range = 7
+                self.prior_window = (self.prior_time_range - 1) / self.fps
                 self.prior_args = nn.Parameter(
-                    torch.from_numpy(np.linspace(-self.window / 4, self.window / 4, self.time_range // 2 + 1,
+                    torch.from_numpy(np.linspace(-self.prior_window / 2, self.prior_window / 2, self.prior_time_range,
                                                  dtype=np.float32)), requires_grad=False)
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
