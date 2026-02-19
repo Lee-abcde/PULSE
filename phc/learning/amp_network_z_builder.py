@@ -799,7 +799,7 @@ class AMPZBuilder(AMPBuilder):
                 if self.z_all:
                     actor_input = z_out
                 else:
-                    central_frame = z_out.shape[-1] // 2   # 61 // 2 = 30
+                    central_frame = -1 if z_out.shape[-1] == self.prior_time_range else z_out.shape[-1] // 2   # 61 // 2 = 30
                     actor_input = torch.cat([self_obs, task_root_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
