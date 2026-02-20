@@ -946,7 +946,24 @@ class AMPAgent(common_agent.CommonAgent):
                 vq_loss = extra_dict['loss']  # Include codebook + commitment
                 info_dict["kin_vq_loss"] = vq_loss
                 info_dict["kin_perplexity"] = extra_dict['perplexity']
+                # ----------- Root Trajectory Prediction Loss -----------
+                if 'pred_root' in extra_dict and 'gt_root' in extra_dict:
+                    pred_root = extra_dict['pred_root']
+                    gt_root = extra_dict['gt_root']
 
+                    # Dimensions 0:2 are X, Y root position translation
+                    root_trans_loss = torch.norm(pred_root[..., :2] - gt_root[..., :2], dim=-1).mean()
+                    info_dict["kin_root_trans_loss"] = root_trans_loss
+
+                    # Dimensions 2:4 are rotation differences on the XY plane
+                    root_rot_loss = torch.norm(pred_root[..., 2:4] - gt_root[..., 2:4], dim=-1).mean()
+                    info_dict["kin_root_rot_loss"] = root_rot_loss
+
+                    # Combined Root Loss
+                    root_loss = root_trans_loss + root_rot_loss
+                    info_dict["kin_root_loss"] = root_loss
+                else:
+                    root_loss = 0.0
                 # -----------  Prior Loss -----------
                 freq_input = extra_dict['frequency'].detach()
                 target_state = extra_dict['state_after_quant'].detach()
@@ -1041,6 +1058,8 @@ class AMPAgent(common_agent.CommonAgent):
                         + prior_info['vq_loss'] * getattr(humanoid_env, "prior_vq_coeff", 0.5)
                         + loss_prior_state * getattr(humanoid_env, "prior_state_coeff", 0.5)
                         + prior_loss * getattr(humanoid_env, "prior_coeff", 0.5)
+                        # ---------------- Root Prediction Loss ----------------
+                        + root_loss * getattr(humanoid_env, "root_prediction_coeff", 1.0)
                 )
 
                 info_dict["kin_action_loss"] = kin_action_loss

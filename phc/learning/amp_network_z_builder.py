@@ -701,7 +701,6 @@ class AMPZBuilder(AMPBuilder):
             a_out = a_out.contiguous().view(a_out.size(0), -1)
 
             self_obs = obs[:, ..., :self.self_obs_size]
-            task_root_obs = self.extract_root_task_condition(obs_dict['obs_orig'][:, self.self_obs_size:])
             assert (obs.shape[-1] == self.self_obs_size + self.task_obs_size)
             
             if self.has_rnn:
@@ -800,7 +799,14 @@ class AMPZBuilder(AMPBuilder):
                     actor_input = z_out
                 else:
                     central_frame = -1 if z_out.shape[-1] == self.prior_time_range else z_out.shape[-1] // 2   # 61 // 2 = 30
-                    actor_input = torch.cat([self_obs, task_root_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
+
+                    gt_task_root_obs = self.extract_root_task_condition(obs_dict['obs_orig'][:, self.self_obs_size:])
+                    predictor_input = torch.cat([self_obs, z_out[:, :, central_frame].detach()], dim=-1)
+                    predicted_root_obs = self.root_predictor(predictor_input)
+                    if self.training:
+                        extra_dict['pred_root'] = predicted_root_obs
+                        extra_dict['gt_root'] = gt_task_root_obs
+                    actor_input = torch.cat([self_obs, predicted_root_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
                 
@@ -1041,6 +1047,14 @@ class AMPZBuilder(AMPBuilder):
                 self.prior_args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.prior_window / 2, self.prior_window / 2, self.prior_time_range,
                                                  dtype=np.float32)), requires_grad=False)
+                self.root_task_dim = 4
+                self.root_predictor = nn.Sequential(
+                    nn.Linear(self.self_obs_size + self.n_latent_channels, 256),
+                    nn.ELU(),
+                    nn.Linear(256, 128),
+                    nn.ELU(),
+                    nn.Linear(128, self.root_task_dim)
+                )
 
                 encoder_channels = [self.n_input_channels] + [self.intermediate_channels] * (self.pae_n_layers - 1) + [self.n_latent_channels]
                 normalizer = partial(LN_v3, keep_std=True)
