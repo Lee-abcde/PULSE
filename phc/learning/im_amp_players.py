@@ -55,6 +55,8 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
         
         # joblib.dump({"mlp": self.model.a2c_network.actor_mlp, "mu": self.model.a2c_network.mu}, "single_model.pkl") # ZL: for saving part of the model.
         self.second_test_chance=True
+        self.prior_window_size = self.config['prior_window_size']
+        self.kinematic_obs_size = self.config['kinematic_obs_size']
         return
 
     def _post_step(self, info, done):
@@ -244,11 +246,22 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
             print_game_res = False
 
             done_indices = []
-
+            ############################################
+            # Test: History Kinematic Obs Collection
+            ############################################
+            W = self.window_size // 2
+            obs_dim = self.kinematic_obs_size
+            if not hasattr(self, 'obs_window') or self.obs_window is None:
+                obs_dict, clip_embedding, kinematic_obs_window = self.env_reset(done_indices)
+                self.obs_window = torch.zeros((batch_size, W, obs_dim), device=self.device)
+                self.obs_window[:, :, :] = obs_dict['obs'][:, None, :self.kinematic_obs_size]
             with torch.no_grad():
                 for n in range(self.max_steps):
                     obs_dict, clip_embedding, kinematic_obs_window = self.env_reset(done_indices)
-
+                    if (isinstance(done_indices, list) and len(done_indices) > 0) or \
+                            (not isinstance(done_indices, list) and done_indices.numel() > 0):
+                        self.obs_window[done_indices] = 0.0
+                        self.obs_window[:, :, :] = obs_dict['obs'][:, None, :self.kinematic_obs_size]
                     if COLLECT_Z: z = self.get_z(obs_dict)
                         
 
@@ -256,9 +269,18 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         masks = self.env.get_action_mask()
                         action = self.get_masked_action(obs_dict, masks, is_determenistic)
                     else:
+                        ############################################
+                        # If prior runs, we replace kinematic obs with history obs
+                        ############################################
+                        if flags.trigger_input or flags.debug:
+                            kinematic_obs_window[:,:W,:] = self.obs_window
+                            print("prior mode")
                         action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding, 'kinematic_obs_window': kinematic_obs_window}, is_determenistic)
 
                     obs_dict, r, done, info = self.env_step(self.env, action)
+
+                    self.obs_window = torch.roll(self.obs_window, shifts=-1, dims=1)
+                    self.obs_window[:, -1, :] = obs_dict[:, :self.kinematic_obs_size]
 
                     cr += r
                     steps += 1
