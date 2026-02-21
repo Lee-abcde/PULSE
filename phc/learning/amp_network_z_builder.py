@@ -44,6 +44,8 @@ class AMPZBuilder(AMPBuilder):
             self.embedding_partion = self.task_obs_size_detail.get("embedding_partion", 1)
             # VQ-PAE
             self.window_size = kwargs['window_size']
+            self.kinematic_obs_size = kwargs['kinematic_obs_size']
+            self.prior_window_size = kwargs['prior_window_size']
             self.top_phase = 1.0
             self.bottom_phase = 0.0
             self.debug_index = 23
@@ -1013,7 +1015,6 @@ class AMPZBuilder(AMPBuilder):
                 # init_mlp(self.z_prior_logvar, mlp_init)
             elif self.z_type == 'vq_pae':
                 self.clip_dim = getattr(self, 'clip_dim', 512)
-                self.kinematic_obs_size = 214
                 self.n_input_channels = self.kinematic_obs_size
                 self.n_latent_channels = self.embedding_size
                 self.fps = 30.
@@ -1036,7 +1037,7 @@ class AMPZBuilder(AMPBuilder):
                 self.args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.window / 2, self.window / 2, self.time_range,
                                                  dtype=np.float32)), requires_grad=False)
-                self.prior_time_range = 7
+                self.prior_time_range = self.prior_window_size
                 self.prior_window = (self.prior_time_range - 1) / self.fps
                 self.prior_args = nn.Parameter(
                     torch.from_numpy(np.linspace(-self.prior_window / 2, self.prior_window / 2, self.prior_time_range,

@@ -227,7 +227,8 @@ class CommonPlayer(players.PpoPlayerContinuous):
 
     def _build_net_config(self):
         obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
-        config = {'actions_num': self.actions_num, 'input_shape': obs_shape, 'num_seqs': self.num_agents, 'window_size': self.window_size}
+        config = {'actions_num': self.actions_num, 'input_shape': obs_shape, 'num_seqs': self.num_agents, 'window_size': self.window_size,
+                  'prior_window_size': self.config['prior_window_size'], 'kinematic_obs_size': self.config['kinematic_obs_size']}
         return config
 
     def _setup_action_space(self):

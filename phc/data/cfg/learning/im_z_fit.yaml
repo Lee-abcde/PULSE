@@ -106,3 +106,5 @@ params:
       games_num: 50000000
     window_size: 61
     fps: 30
+    prior_window_size: 7
+    kinematic_obs_size: 214
