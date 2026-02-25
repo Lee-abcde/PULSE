@@ -274,7 +274,7 @@ class IMAMPPlayerContinuous(amp_players.AMPPlayerContinuous):
                         ############################################
                         if flags.trigger_input or flags.debug:
                             kinematic_obs_window[:,:W,:] = self.obs_window
-                            print("prior mode")
+                            # print("prior mode")
                         action = self.get_action({'obs': obs_dict['obs'], 'clip_embedding': clip_embedding, 'kinematic_obs_window': kinematic_obs_window}, is_determenistic)
 
                     obs_dict, r, done, info = self.env_step(self.env, action)
