@@ -200,9 +200,7 @@ class MotionLibBase():
                         found_id = self.babel_id_lookup[clean_key]
                         duration = self.babel_ann[str(found_id)]['dur']
                         if abs(duration - curr_len) > 1e-2:
-                            print("Found the wrong motion! the duration is not match")
-                            import ipdb; ipdb.set_trace()
-
+                            print("Warning: The duration is not match; The original motion might be clipped by convert_amass_data.py bound variable!")
                         curr_text_dense = ["transition"] * num_frames
                         found_segments = self.babel_lookup[clean_key]
                         if found_segments:
@@ -227,6 +225,8 @@ class MotionLibBase():
                                     # import ipdb; ipdb.set_trace()
                         # post process transition label
                         last_meaningful_action = None
+                        # here we first the first valid action to avoid the last frame is "transition" and
+                        # we want it to transition to the first valid action as your cyclic motion pattern
                         for i in range(num_frames):
                             if curr_text_dense[i] != "transition":
                                 last_meaningful_action = curr_text_dense[i]
@@ -246,13 +246,22 @@ class MotionLibBase():
                         v['babel_text_labels'] = curr_text_dense
 
                         frame_embeddings = []
+                        no_embedding = False
+                        no_embedding_value = None
                         for lbl in curr_text_dense:
                             # Use the helper function to get the tensor
                             if lbl == 'transition to move head in a circle':
                                 import ipdb; ipdb.set_trace()
                             emb = self.get_clip_embedding(lbl)
+                            if emb is None:
+                                no_embedding = True
+                                no_embedding_value = lbl
+                                break
                             frame_embeddings.append(emb)
 
+                        if no_embedding:
+                            print(f"Error: Couldn't find the clip embedding of {no_embedding_value}")
+                            continue
                         if len(frame_embeddings) > 0:
                             clip_tensor = torch.stack(frame_embeddings)
                             v['clip_embeddings'] = clip_tensor.cpu()
@@ -476,7 +485,7 @@ class MotionLibBase():
     def get_total_length(self):
         return sum(self._motion_lengths)
 
-    def get_clip_embedding(self, key: str) -> torch.Tensor:
+    def get_clip_embedding(self, key: str):
         """
         Retrieves the corresponding CLIP embedding tensor for a given text key.
 
@@ -494,8 +503,7 @@ class MotionLibBase():
         embedding = self.clip_embedding_dict.get(key)
 
         if embedding is None:
-            print("key not found")
-            import ipdb; ipdb.set_trace()
+            return embedding
 
         if isinstance(embedding, np.ndarray):
             embedding = torch.from_numpy(embedding).float()
