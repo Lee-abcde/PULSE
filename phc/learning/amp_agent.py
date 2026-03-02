@@ -1028,7 +1028,7 @@ class AMPAgent(common_agent.CommonAgent):
                 # ----------- Loss Function -----------
                 kin_loss = (
                         kin_action_loss
-                        + vq_loss * getattr(humanoid_env, "vq_coeff", 1)
+                        + vq_loss * getattr(humanoid_env, "vq_coeff", 0.1)
                         + kin_obs_recon_loss
                         # + ar1_prior * humanoid_env.ar1_coefficient
                         + state_smooth_loss * getattr(humanoid_env, "state_smooth_coeff", 0.2)

@@ -416,7 +416,7 @@ class AMPZBuilder(AMPBuilder):
                 ###############################################
                 # Check Text label
                 ###############################################
-                # clip_embedding_cur = obs_dict['clip_embedding_window'][:,-1,:].squeeze(0)
+                # clip_embedding_cur = obs_dict['clip_embedding']
                 #
                 # def find_exact_embedding(target_emb, master_embeddings, master_texts):
                 #
@@ -584,7 +584,7 @@ class AMPZBuilder(AMPBuilder):
             state = self.prior_state_fc(state_input)
             # state_ori = state
 
-            loss, state, _, _ = self.quantizer(state, freeze_codebook=True)
+            loss, state, indexes, _ = self.quantizer(state, freeze_codebook=True)
             prior_latent1d = self.prior_phase_conv(prior_latent)  # B, 1, W
             offset = torch.mean(prior_latent1d, dim=2)
             p = self.analytical_phase(prior_latent1d, frequency, offset, prior_mode=True)
@@ -803,6 +803,13 @@ class AMPZBuilder(AMPBuilder):
                     actor_input = z_out
                 else:
                     central_frame = -1 if z_out.shape[-1] == self.prior_time_range else z_out.shape[-1] // 2   # 61 // 2 = 30
+                    # print(task_root_obs)
+                    # import math
+                    # angle = math.radians(0)
+                    # task_root_obs[:, 0] = -0.100
+                    # task_root_obs[:, 1] = 0.00
+                    # task_root_obs[:, 2] = math.cos(angle)
+                    # task_root_obs[:, 3] = math.sin(angle)
                     actor_input = torch.cat([self_obs, task_root_obs, z_out[:, :, central_frame], extra_dict['adapted_clip_embedding']], dim=-1) # [B, Window, Feature]
 
                 a_out = self.actor_mlp(actor_input)
