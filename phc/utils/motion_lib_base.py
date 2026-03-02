@@ -163,6 +163,21 @@ class MotionLibBase():
                 if frame_ann is None:
                     frame_ann = data.get('seq_ann', {})
                 labels = frame_ann.get('labels', [])
+
+                # Filter: skip clips whose labels are all "none" or "unknown"
+                _INVALID_LABELS = {"none", "unknown"}
+                def _is_invalid_label(seg):
+                    lbl = seg.get('proc_label') or seg.get('raw_label') or ""
+                    if isinstance(lbl, str) and lbl.lower() in _INVALID_LABELS:
+                        return True
+                    cat = seg.get('act_cat', [])
+                    if isinstance(cat, list) and all(c.lower() in _INVALID_LABELS for c in cat):
+                        return True
+                    return False
+
+                if labels and all(_is_invalid_label(s) for s in labels):
+                    continue  # skip this BABEL entry entirely
+
                 self.babel_lookup[key_variant_b] = labels
                 self.babel_id_lookup[key_variant_b] = data.get('babel_sid', '')
             print(f"BABEL lookup table built with {len(self.babel_lookup)} keys.")
